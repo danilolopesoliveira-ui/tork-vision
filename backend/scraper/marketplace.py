@@ -295,8 +295,20 @@ class MercadoLivreScraper(BaseScraper):
 
         try:
             url = f"{self._API_BASE}/users/{numeric_id}"
-            data = await self._get_json(url)
+            resp = await self._get(url)
             await asyncio.sleep(self._rate_limit)
+            if resp.status_code == 403:
+                logger.warning("ML API 403 for users/%s — using nickname as seller_name", numeric_id)
+                # Extract nickname from store URL for display
+                loja_m = re.search(r"/loja/([^/?#]+)", store_url)
+                nickname_fallback = loja_m.group(1) if loja_m else numeric_id
+                return {
+                    "seller_id": numeric_id,
+                    "seller_name": nickname_fallback,
+                    "marketplace": self.marketplace,
+                    "store_url": store_url,
+                }
+            data = resp.json() if hasattr(resp, "json") and callable(resp.json) else {}
             return {
                 "seller_id": str(data.get("id", numeric_id)),
                 "seller_name": data.get("nickname", ""),
@@ -310,10 +322,11 @@ class MercadoLivreScraper(BaseScraper):
             return {"seller_id": numeric_id, "marketplace": self.marketplace, "store_url": store_url}
 
     async def get_seller_skus(self, seller_id: str, max_pages: int = 20) -> list[dict[str, Any]]:
-        """Fetch all listings for a seller using ML search API."""
+        """Fetch all listings for a seller. Tries the JSON API first; falls back to HTML scraping."""
         results: list[dict[str, Any]] = []
         offset = 0
         limit = 50
+        api_blocked = False
 
         for _ in range(max_pages):
             url = (
@@ -321,8 +334,13 @@ class MercadoLivreScraper(BaseScraper):
                 f"?seller_id={seller_id}&offset={offset}&limit={limit}"
             )
             try:
-                data = await self._get_json(url)
+                resp = await self._get(url)
                 await asyncio.sleep(self._rate_limit)
+                if resp.status_code == 403:
+                    logger.warning("ML API blocked (403) for seller %s — switching to HTML scrape", seller_id)
+                    api_blocked = True
+                    break
+                data = resp.json() if hasattr(resp, "json") and callable(resp.json) else {}
             except Exception as exc:
                 logger.warning("ML get_seller_skus page error: %s", exc)
                 break
@@ -338,24 +356,149 @@ class MercadoLivreScraper(BaseScraper):
                 break
             offset += limit
 
-        # Enrich the first 10 items with real review data from individual item endpoint
-        for i, parsed in enumerate(results[:10]):
-            item_id = parsed.get("sku_id", "")
-            if not item_id:
-                continue
-            try:
-                detail_url = f"{self._API_BASE}/items/{item_id}"
-                detail = await self._get_json(detail_url)
-                await asyncio.sleep(self._rate_limit)
-                reviews = detail.get("reviews", {}) or {}
-                rating = float(reviews.get("rating_average", parsed["rating"]) or parsed["rating"])
-                review_count = int(reviews.get("total", parsed["review_count"]) or parsed["review_count"])
-                results[i]["rating"] = rating
-                results[i]["review_count"] = review_count
-            except Exception as exc:
-                logger.warning("ML item detail fetch failed for %s: %s", item_id, exc)
+        if api_blocked or not results:
+            logger.info("Falling back to HTML scraping for seller_id=%s", seller_id)
+            results = await self._html_scrape_seller_skus(seller_id, max_pages=max_pages)
+
+        # Enrich the first 10 items with real review data (skip if API is blocked)
+        if not api_blocked:
+            for i, parsed in enumerate(results[:10]):
+                item_id = parsed.get("sku_id", "")
+                if not item_id:
+                    continue
+                try:
+                    detail_url = f"{self._API_BASE}/items/{item_id}"
+                    detail = await self._get_json(detail_url)
+                    await asyncio.sleep(self._rate_limit)
+                    reviews = detail.get("reviews", {}) or {}
+                    rating = float(reviews.get("rating_average", parsed["rating"]) or parsed["rating"])
+                    review_count = int(reviews.get("total", parsed["review_count"]) or parsed["review_count"])
+                    results[i]["rating"] = rating
+                    results[i]["review_count"] = review_count
+                except Exception as exc:
+                    logger.warning("ML item detail fetch failed for %s: %s", item_id, exc)
 
         return results
+
+    async def _html_scrape_seller_skus(self, seller_id: str, max_pages: int = 5) -> list[dict[str, Any]]:
+        """Scrape product listings from the ML website search page (no API key needed)."""
+        results: list[dict[str, Any]] = []
+        items_per_page = 48
+
+        for page in range(max_pages):
+            offset = page * items_per_page + 1
+            url = (
+                f"https://lista.mercadolivre.com.br/MLB/_search"
+                f"?seller_id={seller_id}&_from={offset}&_to={offset + items_per_page - 1}"
+            )
+            try:
+                resp = await self._get(url)
+                await asyncio.sleep(self._rate_limit)
+                if resp.status_code != 200:
+                    logger.warning("HTML scrape returned %s for %s", resp.status_code, url)
+                    break
+                html = resp.text
+            except Exception as exc:
+                logger.warning("HTML scrape fetch error page %d: %s", page, exc)
+                break
+
+            soup = BeautifulSoup(html, "lxml")
+            items = soup.select("li.ui-search-layout__item, li.results-item, div.ui-search-result__wrapper")
+            if not items:
+                # Try alternate selectors
+                items = soup.select("[class*='ui-search-layout__item']")
+            if not items:
+                logger.warning("No items found in HTML for seller_id=%s page=%d", seller_id, page)
+                break
+
+            for item_el in items:
+                parsed = self._parse_html_item(item_el)
+                if parsed:
+                    results.append(parsed)
+
+            logger.info("HTML scrape page %d: found %d items (total so far: %d)", page, len(items), len(results))
+
+            if len(items) < items_per_page // 2:
+                break
+
+        logger.info("HTML scrape complete for seller_id=%s: %d SKUs", seller_id, len(results))
+        return results
+
+    def _parse_html_item(self, el: Any) -> dict[str, Any] | None:
+        """Parse a single product element from the ML HTML search results."""
+        try:
+            title_el = el.select_one(
+                "h2.ui-search-item__title, .poly-component__title, "
+                "h3.ui-search-item__title, [class*='ui-search-item__title']"
+            )
+            title = title_el.get_text(strip=True) if title_el else ""
+            if not title:
+                return None
+
+            price_el = el.select_one(
+                ".andes-money-amount__fraction, .price-tag-fraction, "
+                "[class*='andes-money-amount__fraction']"
+            )
+            price_str = price_el.get_text(strip=True).replace(".", "").replace(",", ".") if price_el else "0"
+            try:
+                price = float(price_str)
+            except ValueError:
+                price = 0.0
+
+            link_el = el.select_one("a.ui-search-link, a.ui-search-item__image-link, a[href*='MLB']")
+            link = link_el.get("href", "") if link_el else ""
+            sku_id_match = re.search(r"MLB\d+", link)
+            sku_id = sku_id_match.group(0) if sku_id_match else hashlib.md5(title.encode()).hexdigest()[:12]
+
+            img_el = el.select_one("img[src], img[data-src]")
+            thumbnail = ""
+            if img_el:
+                thumbnail = img_el.get("src") or img_el.get("data-src") or ""
+
+            rating_el = el.select_one("[class*='reviews__rating'], [aria-label*='estrela'], [aria-label*='star']")
+            rating = 0.0
+            if rating_el:
+                aria = rating_el.get("aria-label", "")
+                m = re.search(r"[\d,.]+", aria)
+                if m:
+                    try:
+                        rating = float(m.group(0).replace(",", "."))
+                    except ValueError:
+                        pass
+
+            review_el = el.select_one("[class*='reviews__amount'], [class*='review-count']")
+            review_count = 0
+            if review_el:
+                m = re.search(r"\d+", review_el.get_text())
+                if m:
+                    review_count = int(m.group(0))
+
+            free_shipping = bool(el.select_one(
+                "[class*='free-shipping'], [class*='frete-gratis'], [aria-label*='Frete grátis']"
+            ))
+            badges = ["frete_gratis"] if free_shipping else []
+
+            return {
+                "sku_id": sku_id,
+                "title": title,
+                "price_current": price,
+                "price_original": price,
+                "rating": rating,
+                "review_count": review_count,
+                "recent_reviews_30d": max(1, review_count // 12),
+                "estimated_monthly_sales": max(1, review_count // 12) * 20,
+                "sales_rank": None,
+                "badges": badges,
+                "marketplace": self.marketplace,
+                "stock_status": "in_stock",
+                "category": "",
+                "subcategory": "",
+                "ean": None,
+                "thumbnail": thumbnail,
+            }
+        except Exception as exc:
+            logger.warning("HTML item parse error: %s", exc)
+            return None
 
     def _parse_ml_item(self, item: dict) -> dict[str, Any]:
         shipping = item.get("shipping", {})
