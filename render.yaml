@@ -1,0 +1,36 @@
+# Tork Vision — Render Blueprint
+# Deploy: connect this repo on render.com → New → Blueprint
+#
+# After the first deploy, update VITE_API_URL in the frontend service
+# to match the exact URL assigned to tork-vision-backend (shown in Render dashboard).
+
+services:
+  # ─────────────────────────────────────────────
+  # Backend — FastAPI (Docker)
+  # ─────────────────────────────────────────────
+  - type: web
+    name: tork-vision-backend
+    env: docker
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:///./tork_vision.db
+      - key: ENVIRONMENT
+        value: production
+    healthCheckPath: /health
+
+  # ─────────────────────────────────────────────
+  # Frontend — React (Static Site)
+  # ─────────────────────────────────────────────
+  - type: web
+    name: tork-vision-frontend
+    env: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: ./frontend/dist
+    envVars:
+      # Set this to the actual backend URL shown in your Render dashboard.
+      # Format: https://tork-vision-backend.onrender.com  (no trailing slash)
+      - key: VITE_API_URL
+        value: https://tork-vision-backend.onrender.com
