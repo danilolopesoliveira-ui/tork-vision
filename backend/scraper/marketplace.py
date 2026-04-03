@@ -321,7 +321,7 @@ class MercadoLivreScraper(BaseScraper):
             logger.warning("ML get_seller_info failed: %s", exc)
             return {"seller_id": numeric_id, "marketplace": self.marketplace, "store_url": store_url}
 
-    async def get_seller_skus(self, seller_id: str, max_pages: int = 20) -> list[dict[str, Any]]:
+    async def get_seller_skus(self, seller_id: str, max_pages: int = 20, store_url: str = "") -> list[dict[str, Any]]:
         """Fetch all listings for a seller. Tries the JSON API first; falls back to HTML scraping."""
         results: list[dict[str, Any]] = []
         offset = 0
@@ -357,8 +357,8 @@ class MercadoLivreScraper(BaseScraper):
             offset += limit
 
         if api_blocked or not results:
-            logger.info("Falling back to HTML scraping for seller_id=%s", seller_id)
-            results = await self._html_scrape_seller_skus(seller_id, max_pages=max_pages)
+            logger.info("Falling back to HTML scraping for seller_id=%s store_url=%s", seller_id, store_url)
+            results = await self._html_scrape_seller_skus(store_url or seller_id, max_pages=min(max_pages, 5))
 
         # Enrich the first 10 items with real review data (skip if API is blocked)
         if not api_blocked:
@@ -380,22 +380,35 @@ class MercadoLivreScraper(BaseScraper):
 
         return results
 
-    async def _html_scrape_seller_skus(self, seller_id: str, max_pages: int = 5) -> list[dict[str, Any]]:
-        """Scrape product listings from the ML website search page (no API key needed)."""
+    async def _html_scrape_seller_skus(self, store_url: str, max_pages: int = 5) -> list[dict[str, Any]]:
+        """Scrape product listings from the ML store page (no API key needed)."""
         results: list[dict[str, Any]] = []
         items_per_page = 48
 
+        # Build base store URL — handle both full URL and seller_id fallback
+        loja_match = re.search(r"/loja/([^/?#]+)", store_url)
+        if loja_match:
+            nickname = loja_match.group(1)
+            base_url = f"https://lista.mercadolivre.com.br/loja/{urllib.parse.quote(nickname)}/"
+        else:
+            # Fallback: search by seller_id
+            base_url = f"https://lista.mercadolivre.com.br/MLB/_Desde_{{offset}}_NoIndex_True?seller_id={store_url}"
+
         for page in range(max_pages):
             offset = page * items_per_page + 1
-            url = (
-                f"https://lista.mercadolivre.com.br/MLB/_search"
-                f"?seller_id={seller_id}&_from={offset}&_to={offset + items_per_page - 1}"
-            )
+            if loja_match:
+                if page == 0:
+                    page_url = base_url
+                else:
+                    page_url = f"{base_url}_Desde_{offset}_NoIndex_True"
+            else:
+                page_url = base_url.format(offset=offset)
+
             try:
-                resp = await self._get(url)
+                resp = await self._get(page_url)
                 await asyncio.sleep(self._rate_limit)
                 if resp.status_code != 200:
-                    logger.warning("HTML scrape returned %s for %s", resp.status_code, url)
+                    logger.warning("HTML scrape returned %s for %s", resp.status_code, page_url)
                     break
                 html = resp.text
             except Exception as exc:
@@ -403,12 +416,11 @@ class MercadoLivreScraper(BaseScraper):
                 break
 
             soup = BeautifulSoup(html, "lxml")
-            items = soup.select("li.ui-search-layout__item, li.results-item, div.ui-search-result__wrapper")
+            items = soup.select("li.ui-search-layout__item")
             if not items:
-                # Try alternate selectors
                 items = soup.select("[class*='ui-search-layout__item']")
             if not items:
-                logger.warning("No items found in HTML for seller_id=%s page=%d", seller_id, page)
+                logger.warning("No items found in HTML for %s page=%d", store_url, page)
                 break
 
             for item_el in items:
@@ -416,12 +428,12 @@ class MercadoLivreScraper(BaseScraper):
                 if parsed:
                     results.append(parsed)
 
-            logger.info("HTML scrape page %d: found %d items (total so far: %d)", page, len(items), len(results))
+            logger.info("HTML scrape page %d url=%s: found %d items (total: %d)", page, page_url, len(items), len(results))
 
             if len(items) < items_per_page // 2:
                 break
 
-        logger.info("HTML scrape complete for seller_id=%s: %d SKUs", seller_id, len(results))
+        logger.info("HTML scrape complete for %s: %d SKUs", store_url, len(results))
         return results
 
     def _parse_html_item(self, el: Any) -> dict[str, Any] | None:

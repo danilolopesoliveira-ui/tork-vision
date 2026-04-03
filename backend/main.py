@@ -583,7 +583,7 @@ async def _run_analysis_job(job_id: str, url: str) -> None:
             _jobs[job_id]["progress"] = 0.30
             _jobs[job_id]["step"] = f"Coletando SKUs de {seller_name}..."
 
-            skus_raw = await scraper.get_seller_skus(str(seller_id_raw), max_pages=5)
+            skus_raw = await scraper.get_seller_skus(str(seller_id_raw), max_pages=5, store_url=url)
             _jobs[job_id]["progress"] = 0.60
             _jobs[job_id]["step"] = "Calculando métricas e concorrentes..."
 
