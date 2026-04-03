@@ -783,6 +783,17 @@ async def get_seller(seller_id: str, db: AsyncSession = Depends(get_db)):
     return _seller_to_schema(seller)
 
 
+@app.delete("/api/sellers/{seller_id}", status_code=204)
+async def delete_seller(seller_id: str, db: AsyncSession = Depends(get_db)):
+    """Delete a seller and all associated data by seller_id."""
+    stmt = select(Seller).where(Seller.seller_id == seller_id)
+    result = await db.execute(stmt)
+    seller = result.scalars().first()
+    if not seller:
+        raise HTTPException(status_code=404, detail="Seller not found")
+    await db.delete(seller)
+
+
 # ---------------------------------------------------------------------------
 # Routes — Competitors
 # ---------------------------------------------------------------------------
