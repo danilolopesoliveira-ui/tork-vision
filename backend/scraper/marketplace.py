@@ -231,6 +231,29 @@ class MercadoLivreScraper(BaseScraper):
         except Exception as exc:
             logger.warning("Nickname users-search failed for %s: %s", nickname, exc)
 
+        # Strategy 3: parse the store page HTML for a numeric seller ID
+        await asyncio.sleep(self._rate_limit)
+        store_url = f"https://lista.mercadolivre.com.br/loja/{urllib.parse.quote(nickname)}/"
+        try:
+            resp = await self._get(store_url)
+            html = resp.text if hasattr(resp, "text") else ""
+            # Look for seller/user numeric IDs embedded in JS or data attributes
+            for pattern in [
+                r'"seller_id"\s*:\s*"?(\d+)"?',
+                r'"sellerId"\s*:\s*"?(\d+)"?',
+                r'"user_id"\s*:\s*"?(\d+)"?',
+                r'seller_id=(\d+)',
+                r'/users/(\d+)',
+                r'"id"\s*:\s*(\d{6,})',  # numeric IDs >= 6 digits
+            ]:
+                m = re.search(pattern, html)
+                if m:
+                    sid = m.group(1)
+                    logger.info("Resolved nickname %s → %s (HTML scrape)", nickname, sid)
+                    return sid
+        except Exception as exc:
+            logger.warning("Nickname HTML-scrape failed for %s: %s", nickname, exc)
+
         logger.warning("Could not resolve nickname to numeric ID: %s", nickname)
         return None
 
