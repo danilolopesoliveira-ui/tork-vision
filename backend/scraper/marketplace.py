@@ -199,15 +199,39 @@ class MercadoLivreScraper(BaseScraper):
     _rate_limit = 0.5  # 2 req/s
 
     async def _resolve_nickname_to_id(self, nickname: str) -> str | None:
-        """Resolve a ML store nickname to a numeric seller ID via the search API."""
-        url = f"{self._API_BASE}/sites/MLB/search?nickname={nickname}&limit=1"
+        """Resolve a ML store nickname to a numeric seller ID.
+
+        Strategy 1: items search API — works when the seller has active listings.
+        Strategy 2: users search API — works even when the items search returns empty.
+        """
+        # Strategy 1: items search
+        url = f"{self._API_BASE}/sites/MLB/search?nickname={urllib.parse.quote(nickname)}&limit=1"
         try:
             data = await self._get_json(url)
             results = data.get("results", [])
             if results:
-                return str(results[0].get("seller", {}).get("id", ""))
+                sid = str(results[0].get("seller", {}).get("id", ""))
+                if sid and sid != "0":
+                    logger.info("Resolved nickname %s → %s (items search)", nickname, sid)
+                    return sid
         except Exception as exc:
-            logger.warning("Failed to resolve nickname %s: %s", nickname, exc)
+            logger.warning("Nickname items-search failed for %s: %s", nickname, exc)
+
+        # Strategy 2: users search API
+        await asyncio.sleep(self._rate_limit)
+        url2 = f"{self._API_BASE}/users/search?nickname={urllib.parse.quote(nickname)}"
+        try:
+            data = await self._get_json(url2)
+            results = data.get("results", [])
+            if results:
+                sid = str(results[0].get("id", ""))
+                if sid and sid != "0":
+                    logger.info("Resolved nickname %s → %s (users search)", nickname, sid)
+                    return sid
+        except Exception as exc:
+            logger.warning("Nickname users-search failed for %s: %s", nickname, exc)
+
+        logger.warning("Could not resolve nickname to numeric ID: %s", nickname)
         return None
 
     async def get_seller_info(self, store_url: str) -> dict[str, Any]:
