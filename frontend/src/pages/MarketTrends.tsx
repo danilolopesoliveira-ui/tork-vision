@@ -98,9 +98,9 @@ function TrendCard({ product, type }: { product: TrendProduct; type: Tab }) {
       <SparkLine values={sparkValues} />
       <div className="flex items-center justify-between mt-2 text-xs text-text-secondary">
         <span>
-          {product.price_current.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          {(product.price_current ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
         </span>
-        <span>{product.estimated_monthly_sales.toLocaleString('pt-BR')} un/mês</span>
+        <span>{(product.estimated_monthly_sales ?? 0).toLocaleString('pt-BR')} un/mês</span>
       </div>
     </div>
   )
@@ -143,7 +143,7 @@ function NewEntrantCard({ product }: { product: TrendProduct }) {
       <div className="mt-1 flex items-center justify-between text-xs">
         <span className="text-text-secondary">Preço</span>
         <span className="font-medium text-text-primary">
-          {product.price_current.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          {(product.price_current ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
         </span>
       </div>
       <div className="w-full bg-border-dark rounded-full h-1 mt-2">
@@ -289,13 +289,13 @@ function MonthlyRankingSection() {
                     </span>
                   </td>
                   <td className="py-3 px-3 text-right font-medium text-text-primary">
-                    {item.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    {(item.price ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                   </td>
                   <td className="py-3 px-3 text-right text-text-secondary">
-                    {item.estimated_monthly_sales.toLocaleString('pt-BR')}
+                    {(item.estimated_monthly_sales ?? 0).toLocaleString('pt-BR')}
                   </td>
                   <td className="py-3 px-3 text-right font-semibold text-text-primary">
-                    {item.revenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    {(item.revenue ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                   </td>
                   <td className="py-3 px-3 text-center">
                     <RankChangeBadge rank={item.rank} />

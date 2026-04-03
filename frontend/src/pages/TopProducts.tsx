@@ -162,7 +162,7 @@ function ProductCard({ product, rank }: { product: TopProduct; rank: number }) {
           <div>
             <p className="text-text-secondary">Preço</p>
             <p className="font-semibold text-text-primary">
-              {product.price_current.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              {(product.price_current ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
             </p>
           </div>
           <div>
@@ -172,7 +172,7 @@ function ProductCard({ product, rank }: { product: TopProduct; rank: number }) {
           <div>
             <p className="text-text-secondary">Vol./mês</p>
             <p className="font-semibold text-text-primary">
-              {product.estimated_monthly_sales.toLocaleString('pt-BR')}
+              {(product.estimated_monthly_sales ?? 0).toLocaleString('pt-BR')}
             </p>
           </div>
         </div>
@@ -216,7 +216,7 @@ function ProductCard({ product, rank }: { product: TopProduct; rank: number }) {
             <div className="ml-auto text-right">
               <p className="text-xs text-text-secondary">Preço atual</p>
               <p className="font-bold text-text-primary">
-                {product.price_current.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                {(product.price_current ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
               </p>
             </div>
           </div>
@@ -283,7 +283,7 @@ export default function TopProducts() {
       header: 'Preço',
       sortable: true,
       render: (row: TopProduct) =>
-        row.price_current.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+        (row.price_current ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
     },
     {
       key: 'rating' as const,
@@ -296,7 +296,7 @@ export default function TopProducts() {
       key: 'estimated_monthly_sales' as const,
       header: 'Vol./mês',
       sortable: true,
-      render: (row: TopProduct) => row.estimated_monthly_sales.toLocaleString('pt-BR'),
+      render: (row: TopProduct) => (row.estimated_monthly_sales ?? 0).toLocaleString('pt-BR'),
     },
     {
       key: 'seller_name' as const,

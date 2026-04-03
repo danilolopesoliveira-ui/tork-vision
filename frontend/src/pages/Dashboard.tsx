@@ -214,7 +214,7 @@ export default function Dashboard() {
       sku_id: c.sku_id,
       seller_id: '',
       severity: 'medium' as const,
-      message: `${c.title}: preço ${c.direction === 'down' ? 'caiu' : 'subiu'} ${Math.abs(c.change_pct).toFixed(1)}% (de ${c.old_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} para ${c.new_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})`,
+      message: `${c.title}: preço ${c.direction === 'down' ? 'caiu' : 'subiu'} ${Math.abs(c.change_pct ?? 0).toFixed(1)}% (de ${(c.old_price ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} para ${(c.new_price ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})`,
       detected_at: c.detected_at,
     })) || []),
     ...(alerts?.market_alerts?.map((a) => ({
@@ -397,7 +397,7 @@ export default function Dashboard() {
                     {sku.category}
                   </span>
                   <span className="font-semibold text-text-primary">
-                    {sku.price_current.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    {(sku.price_current ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                   </span>
                 </div>
               </div>
