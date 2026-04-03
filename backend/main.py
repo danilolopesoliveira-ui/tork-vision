@@ -1354,3 +1354,33 @@ async def get_price_heatmap(
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "service": "tork-vision-api", "version": "1.0.0"}
+
+
+@app.get("/api/debug/resolve/{nickname}")
+async def debug_resolve_nickname(nickname: str):
+    """Debug: test ML nickname resolution strategies."""
+    from scraper.marketplace import MercadoLivreScraper
+    import urllib.parse as _up
+    scraper = MercadoLivreScraper()
+    api_base = "https://api.mercadolibre.com"
+
+    async def _safe_json(url: str):
+        try:
+            resp = await scraper._get(url)
+            body = resp.json() if hasattr(resp, "json") and callable(resp.json) else {}
+            return {"status": getattr(resp, "status_code", None), "body": body}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    s1 = await _safe_json(f"{api_base}/sites/MLB/search?nickname={_up.quote(nickname)}&limit=2")
+    s2 = await _safe_json(f"{api_base}/users/search?nickname={_up.quote(nickname)}")
+    resolved = await scraper._resolve_nickname_to_id(nickname)
+    user_info = await _safe_json(f"{api_base}/users/{resolved}") if resolved else None
+    await scraper.close()
+    return {
+        "nickname": nickname,
+        "resolved_id": resolved,
+        "strategy1_items_search": s1,
+        "strategy2_users_search": s2,
+        "user_info": user_info,
+    }
