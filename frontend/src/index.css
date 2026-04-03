@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-surface-darker text-text-primary font-sans antialiased;
+    min-height: 100vh;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-surface-dark;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border-dark rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-petroleum-500;
+  }
+
+  /* Light mode overrides */
+  html.light body {
+    @apply bg-gray-50 text-gray-900;
+  }
+  html.light .bg-surface-dark {
+    @apply bg-white;
+  }
+  html.light .bg-surface-darker {
+    @apply bg-gray-50;
+  }
+  html.light .border-border-dark {
+    @apply border-gray-200;
+  }
+  html.light .text-text-primary {
+    @apply text-gray-900;
+  }
+  html.light .text-text-secondary {
+    @apply text-gray-500;
+  }
+}
+
+@layer utilities {
+  .line-clamp-1 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+  }
+  .line-clamp-2 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p \"/c/Users/dloge/OneDrive/Área de Trabalho/Tork Vision/backend/models\")",
+      "Bash(mkdir -p \"/c/Users/dloge/OneDrive/Área de Trabalho/Tork Vision/backend/scraper\")",
+      "Bash(mkdir -p \"/c/Users/dloge/OneDrive/Área de Trabalho/Tork Vision/backend/services\")",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)",
+      "Bash(pip --version)",
+      "Bash(pip install:*)",
+      "Bash(npm --version)",
+      "Bash(python -c \"from main import app; print\\('FastAPI app loaded OK'\\)\")",
+      "Bash(sed:*)",
+      "Bash(python -c ':*)",
+      "Bash(uvicorn main:app --port 8000 --host 0.0.0.0)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -s http://localhost:8000/api/sellers)",
+      "Bash(python -m json.tool)",
+      "Bash(curl -s \"http://localhost:8000/api/dashboard/electroshop_ml\")",
+      "Bash(curl -s http://localhost:3000)",
+      "Bash(curl -s \"http://localhost:8000/api/rankings/top-products?limit=5\")",
+      "Bash(curl -s \"http://localhost:8000/api/competitors/electroshop_ml\")",
+      "Bash(wait)",
+      "Bash(curl -s \"http://localhost:8000/api/trends/rising\")",
+      "Bash(curl -s \"http://localhost:8000/api/matrix/price-volume?seller_id=electroshop_ml\")",
+      "Bash(curl -s \"http://localhost:8000/api/revenue/electroshop_ml?period=monthly\")",
+      "Bash(python -c \"from main import app; print\\('main.py OK'\\)\")",
+      "Bash(python -c \"from scraper.marketplace import MercadoLivreScraper, ShopeeScraper, AmazonScraper, MagaluScraper, AmericanasScraper, _CATEGORY_MAP; print\\('marketplace.py OK'\\); print\\('Category map entries:', len\\(_CATEGORY_MAP\\)\\)\")",
+      "Bash(python -c \"from main import app; from scraper.marketplace import MercadoLivreScraper, MarketplaceDetector; print\\('OK'\\)\")",
+      "Bash(curl -s \"http://localhost:8000/api/marketplaces/status\")",
+      "Bash(netstat -ano)",
+      "Bash(taskkill /PID 46720 /F)",
+      "Bash(cmd //c \"taskkill /PID 46720 /F\")",
+      "Bash(uvicorn main:app --port 8000)",
+      "Bash(curl -s -X POST \"http://localhost:8000/api/analyze\" -H \"Content-Type: application/json\" -d '{\"url\":\"https://shopee.com.br/loja/teste\"}')",
+      "Bash(curl -s \"http://localhost:8000/api/jobs/ad7231c8-4031-4994-aa0a-c1d15fab2363\")",
+      "Bash(git --version)",
+      "Bash(git -C \"/c/Users/dloge/OneDrive/Área de Trabalho/Tork Vision\" status)"
+    ]
+  }
+}
