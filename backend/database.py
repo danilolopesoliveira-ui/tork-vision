@@ -10,12 +10,14 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./tork_vision.db")
 # SQLite needs check_same_thread=False; PostgreSQL doesn't need it
 connect_args = {}
 if DATABASE_URL.startswith("sqlite"):
-    connect_args = {"check_same_thread": False}
+    connect_args = {"check_same_thread": False, "timeout": 30}
 
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
     connect_args=connect_args,
+    pool_size=1,
+    max_overflow=0,
 )
 
 AsyncSessionLocal = async_sessionmaker(
@@ -49,3 +51,7 @@ async def init_db():
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Enable WAL mode for better concurrency on SQLite
+        if DATABASE_URL.startswith("sqlite"):
+            await conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+            await conn.exec_driver_sql("PRAGMA busy_timeout=30000")
