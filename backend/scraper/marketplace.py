@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 import re
 import time
 import urllib.parse
@@ -17,6 +18,49 @@ import httpx
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# ML OAuth token cache
+# ---------------------------------------------------------------------------
+_ml_token_cache: dict[str, Any] = {"token": None, "expires_at": 0.0}
+
+
+async def _get_ml_access_token(client: "httpx.AsyncClient") -> str | None:
+    """Fetch OAuth Client Credentials token from ML API. Cached for 6h."""
+    app_id = os.environ.get("ML_APP_ID", "")
+    secret_key = os.environ.get("ML_SECRET_KEY", "")
+    if not app_id or not secret_key:
+        return None
+
+    now = time.monotonic()
+    if _ml_token_cache["token"] and now < _ml_token_cache["expires_at"]:
+        return _ml_token_cache["token"]
+
+    try:
+        resp = await client.post(
+            "https://api.mercadolibre.com/oauth/token",
+            data={
+                "grant_type": "client_credentials",
+                "client_id": app_id,
+                "client_secret": secret_key,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            token = data.get("access_token", "")
+            expires_in = int(data.get("expires_in", 21600))
+            _ml_token_cache["token"] = token
+            _ml_token_cache["expires_at"] = now + expires_in - 300
+            logger.info("ML OAuth token obtained, expires in %ds", expires_in)
+            return token
+        else:
+            logger.error("ML OAuth token failed: %s %s", resp.status_code, resp.text[:200])
+    except Exception as exc:
+        logger.error("ML OAuth token error: %s", exc)
+    return None
+
 
 # ---------------------------------------------------------------------------
 # HTML cache with 6-hour TTL
@@ -198,16 +242,51 @@ class MercadoLivreScraper(BaseScraper):
     _API_BASE = "https://api.mercadolibre.com"
     _rate_limit = 0.5  # 2 req/s
 
+    async def _api_get_json(self, url: str) -> dict:
+        """GET ML API endpoint with OAuth Bearer token if available."""
+        token = await _get_ml_access_token(self._client)
+        headers = {"Accept": "application/json", "User-Agent": _user_agent()}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        try:
+            resp = await self._client.get(url, headers=headers, timeout=20)
+            if resp.status_code == 200:
+                return resp.json()
+            logger.warning("ML API %s returned %s", url, resp.status_code)
+        except Exception as exc:
+            logger.warning("ML API request failed for %s: %s", url, exc)
+        return {}
+
+    async def _api_fetch_seller_skus(self, seller_id: str, max_pages: int) -> list[dict[str, Any]]:
+        """Fetch seller's items from ML API using OAuth token."""
+        results: list[dict[str, Any]] = []
+        limit = 50
+        for page in range(max_pages):
+            offset = page * limit
+            url = f"{self._API_BASE}/sites/MLB/search?seller_id={seller_id}&limit={limit}&offset={offset}"
+            data = await self._api_get_json(url)
+            items = data.get("results", [])
+            if not items:
+                break
+            for item in items:
+                parsed = self._parse_ml_item(item)
+                results.append(parsed)
+            logger.info("API page %d seller %s: %d items (total: %d)", page, seller_id, len(items), len(results))
+            if len(items) < limit:
+                break
+            await asyncio.sleep(self._rate_limit)
+        return results
+
     async def _resolve_nickname_to_id(self, nickname: str) -> str | None:
         """Resolve a ML store nickname to a numeric seller ID.
 
         Strategy 1: items search API — works when the seller has active listings.
         Strategy 2: users search API — works even when the items search returns empty.
         """
-        # Strategy 1: items search
+        # Strategy 1: items search (authenticated)
         url = f"{self._API_BASE}/sites/MLB/search?nickname={urllib.parse.quote(nickname)}&limit=1"
         try:
-            data = await self._get_json(url)
+            data = await self._api_get_json(url)
             results = data.get("results", [])
             if results:
                 sid = str(results[0].get("seller", {}).get("id", ""))
@@ -217,11 +296,11 @@ class MercadoLivreScraper(BaseScraper):
         except Exception as exc:
             logger.warning("Nickname items-search failed for %s: %s", nickname, exc)
 
-        # Strategy 2: users search API
+        # Strategy 2: users search API (authenticated)
         await asyncio.sleep(self._rate_limit)
         url2 = f"{self._API_BASE}/users/search?nickname={urllib.parse.quote(nickname)}"
         try:
-            data = await self._get_json(url2)
+            data = await self._api_get_json(url2)
             results = data.get("results", [])
             if results:
                 sid = str(results[0].get("id", ""))
@@ -295,11 +374,10 @@ class MercadoLivreScraper(BaseScraper):
 
         try:
             url = f"{self._API_BASE}/users/{numeric_id}"
-            resp = await self._get(url)
+            data = await self._api_get_json(url)
             await asyncio.sleep(self._rate_limit)
-            if resp.status_code == 403:
-                logger.warning("ML API 403 for users/%s — using nickname as seller_name", numeric_id)
-                # Extract nickname from store URL for display
+            if not data:
+                logger.warning("ML API returned empty for users/%s — using nickname as fallback", numeric_id)
                 loja_m = re.search(r"/loja/([^/?#]+)", store_url)
                 nickname_fallback = loja_m.group(1) if loja_m else numeric_id
                 return {
@@ -308,7 +386,6 @@ class MercadoLivreScraper(BaseScraper):
                     "marketplace": self.marketplace,
                     "store_url": store_url,
                 }
-            data = resp.json() if hasattr(resp, "json") and callable(resp.json) else {}
             return {
                 "seller_id": str(data.get("id", numeric_id)),
                 "seller_name": data.get("nickname", ""),
@@ -322,32 +399,22 @@ class MercadoLivreScraper(BaseScraper):
             return {"seller_id": numeric_id, "marketplace": self.marketplace, "store_url": store_url}
 
     async def get_seller_skus(self, seller_id: str, max_pages: int = 20, store_url: str = "") -> list[dict[str, Any]]:
-        """Fetch all listings for a seller via HTML scraping (API requires OAuth)."""
-        # Use HTML scraping directly — ML API requires OAuth token which is not available
+        """Fetch all listings for a seller. Uses OAuth API when available, falls back to HTML scraping."""
+        # Try authenticated API first — gives real data (sold_quantity, categories, ratings)
+        if seller_id and seller_id.isdigit():
+            token = await _get_ml_access_token(self._client)
+            if token:
+                logger.info("Fetching SKUs via ML API (OAuth) for seller_id=%s", seller_id)
+                results = await self._api_fetch_seller_skus(seller_id, max_pages=min(max_pages, 20))
+                if results:
+                    logger.info("ML API returned %d SKUs for seller_id=%s", len(results), seller_id)
+                    return results
+                logger.warning("ML API returned 0 items for seller_id=%s, falling back to HTML scrape", seller_id)
+
+        # Fallback: HTML scraping
         scrape_target = store_url or seller_id
         logger.info("Fetching SKUs via HTML scrape for seller_id=%s store_url=%s", seller_id, scrape_target)
-        results = await self._html_scrape_seller_skus(scrape_target, max_pages=min(max_pages, 5))
-        api_blocked = True  # flag to skip API-based enrichment below
-
-        # Enrich the first 10 items with real review data (skip if API is blocked)
-        if not api_blocked:
-            for i, parsed in enumerate(results[:10]):
-                item_id = parsed.get("sku_id", "")
-                if not item_id:
-                    continue
-                try:
-                    detail_url = f"{self._API_BASE}/items/{item_id}"
-                    detail = await self._get_json(detail_url)
-                    await asyncio.sleep(self._rate_limit)
-                    reviews = detail.get("reviews", {}) or {}
-                    rating = float(reviews.get("rating_average", parsed["rating"]) or parsed["rating"])
-                    review_count = int(reviews.get("total", parsed["review_count"]) or parsed["review_count"])
-                    results[i]["rating"] = rating
-                    results[i]["review_count"] = review_count
-                except Exception as exc:
-                    logger.warning("ML item detail fetch failed for %s: %s", item_id, exc)
-
-        return results
+        return await self._html_scrape_seller_skus(scrape_target, max_pages=min(max_pages, 5))
 
     async def _html_scrape_seller_skus(self, store_url: str, max_pages: int = 5) -> list[dict[str, Any]]:
         """Scrape product listings from the ML store page (no API key needed)."""
@@ -552,12 +619,32 @@ class MercadoLivreScraper(BaseScraper):
         }
 
     async def get_sku_competitors(self, sku_id: str, title: str = "") -> list[dict[str, Any]]:
-        """Find other sellers offering the same item via HTML search (no auth needed)."""
+        """Find competitors for a SKU via ML API (OAuth) or HTML fallback."""
         competitors: list[dict[str, Any]] = []
         search_title = title
+
         try:
+            token = await _get_ml_access_token(self._client)
+
+            if token and search_title:
+                # Use authenticated API search — returns real seller IDs and sales data
+                q_encoded = urllib.parse.quote(search_title[:80])
+                url = f"{self._API_BASE}/sites/MLB/search?q={q_encoded}&limit=20"
+                data = await self._api_get_json(url)
+                await asyncio.sleep(self._rate_limit)
+                for item in data.get("results", []):
+                    if item.get("id") == sku_id:
+                        continue
+                    parsed = self._parse_ml_item(item)
+                    seller = item.get("seller", {})
+                    parsed["seller_id"] = str(seller.get("id", ""))
+                    parsed["seller_name"] = seller.get("nickname", parsed.get("seller_name", ""))
+                    if parsed["seller_id"]:
+                        competitors.append(parsed)
+                return competitors
+
+            # Fallback: HTML search
             if not search_title and sku_id:
-                # Try to get title from item page HTML
                 item_page = f"https://www.mercadolivre.com.br/p/{sku_id}"
                 try:
                     resp = await self._get(item_page)
@@ -571,7 +658,6 @@ class MercadoLivreScraper(BaseScraper):
             if not search_title:
                 return competitors
 
-            # Search ML website for this title
             q_encoded = urllib.parse.quote(search_title[:80])
             search_url = f"https://lista.mercadolivre.com.br/{q_encoded}"
             resp = await self._get(search_url)
@@ -579,12 +665,9 @@ class MercadoLivreScraper(BaseScraper):
 
             soup = BeautifulSoup(resp.text, "lxml")
             items = soup.select("li.ui-search-layout__item")[:10]
-
             for el in items:
                 parsed = self._parse_html_item(el)
                 if parsed and parsed.get("sku_id") != sku_id:
-                    # seller_name already extracted by _parse_html_item via poly-component__seller
-                    # Use seller_store as seller_id key (normalized)
                     store = parsed.get("seller_name", "").strip()
                     parsed["seller_id"] = re.sub(r"\s+", "_", store.lower())[:32] if store else parsed.get("sku_id", "")[:12]
                     competitors.append(parsed)
