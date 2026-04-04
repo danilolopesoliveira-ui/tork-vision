@@ -69,19 +69,19 @@ function SKUDetailModal({
             <div className="p-3 rounded-lg bg-surface-darker border border-border-dark">
               <p className="text-xs text-text-secondary mb-1">Preço Atual</p>
               <p className="font-bold text-text-primary">
-                {point.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                {(point.price ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
               </p>
             </div>
             <div className="p-3 rounded-lg bg-surface-darker border border-border-dark">
               <p className="text-xs text-text-secondary mb-1">Vol. Mensal Est.</p>
               <p className="font-bold text-text-primary">
-                {point.volume.toLocaleString('pt-BR')}
+                {(point.volume ?? 0).toLocaleString('pt-BR')}
               </p>
             </div>
             <div className="p-3 rounded-lg bg-surface-darker border border-border-dark">
               <p className="text-xs text-text-secondary mb-1">Receita Est.</p>
               <p className="font-bold text-orange-accent">
-                {point.revenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                {(point.revenue ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
               </p>
             </div>
           </div>

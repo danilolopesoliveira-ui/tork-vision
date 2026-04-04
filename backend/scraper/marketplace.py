@@ -490,6 +490,18 @@ class MercadoLivreScraper(BaseScraper):
             ))
             badges = ["frete_gratis"] if free_shipping else []
 
+            # Extract seller name from poly-component__seller
+            # Format: "{brand}por {store_name}" or just "{store_name}"
+            seller_el = el.select_one("[class*='poly-component__seller']")
+            seller_name = ""
+            seller_store = ""
+            if seller_el:
+                seller_text = seller_el.get_text(strip=True)
+                if "por " in seller_text:
+                    seller_store = seller_text.split("por ")[-1].strip()
+                else:
+                    seller_store = seller_text
+
             return {
                 "sku_id": sku_id,
                 "title": title,
@@ -503,14 +515,37 @@ class MercadoLivreScraper(BaseScraper):
                 "badges": badges,
                 "marketplace": self.marketplace,
                 "stock_status": "in_stock",
-                "category": "",
+                "category": self._infer_category(title),
                 "subcategory": "",
                 "ean": None,
                 "thumbnail": thumbnail,
+                "seller_name": seller_store,
             }
         except Exception as exc:
             logger.warning("HTML item parse error: %s", exc)
             return None
+
+    _CATEGORY_KEYWORDS: list[tuple[str, list[str]]] = [
+        ("Ferramentas Elétricas", ["furadeira", "parafusadeira", "esmerilhadeira", "martelete", "serra", "lixadeira", "politriz", "retífica", "soprador", "compressor", "moto-esmeril"]),
+        ("Ferramentas Manuais", ["chave", "alicate", "martelo", "morsa", "paquímetro", "torquímetro", "jogo de ferramentas", "maleta", "caixa de ferramentas", "lima", "formão", "enxada", "pá"]),
+        ("Abrasivos", ["disco de corte", "disco de desbaste", "lixa", "abrasivo", "rebolo", "flap", "escova de aço", "escova de nylon"]),
+        ("Fixação e Adesivos", ["fita", "adesivo", "cola", "silicone", "vedante", "selante", "parafuso", "prego", "bucha", "fixador", "abraçadeira"]),
+        ("Equipamentos Industriais", ["compressor", "gerador", "bomba", "motor", "inversor", "solda", "soldador", "máquina de solda", "extrator", "aspirador industrial", "lavadora"]),
+        ("Segurança do Trabalho", ["epi", "capacete", "luva", "óculos", "protetor", "cinto de segurança", "colete", "bota", "máscara"]),
+        ("Lubrificantes e Químicos", ["óleo", "graxa", "lubrificante", "solvente", "desengraxante", "fluido", "engraxadeira"]),
+        ("Iluminação", ["luminária", "led", "lâmpada", "refletor", "holofote", "lanterna"]),
+        ("Equipamentos de Medição", ["medidor", "manômetro", "termômetro", "multímetro", "detector", "nível", "trena", "fita métrica"]),
+        ("Equipamentos Hidráulicos", ["mangueira", "conexão", "válvula", "registro", "engate", "tubo", "aquecedor", "chuveiro"]),
+        ("Máquinas e Equipamentos", ["liquidificador", "misturador", "processador", "tostadeira", "forno", "balança", "máquina"]),
+    ]
+
+    def _infer_category(self, title: str) -> str:
+        """Infer product category from title keywords."""
+        title_lower = title.lower()
+        for category, keywords in self._CATEGORY_KEYWORDS:
+            if any(kw in title_lower for kw in keywords):
+                return category
+        return "Outros"
 
     def _parse_ml_item(self, item: dict) -> dict[str, Any]:
         shipping = item.get("shipping", {})
@@ -579,10 +614,10 @@ class MercadoLivreScraper(BaseScraper):
             for el in items:
                 parsed = self._parse_html_item(el)
                 if parsed and parsed.get("sku_id") != sku_id:
-                    # Try to extract seller info from element
-                    seller_el = el.select_one("[class*='seller'], [class*='store-name']")
-                    parsed["seller_name"] = seller_el.get_text(strip=True) if seller_el else ""
-                    parsed["seller_id"] = parsed.get("sku_id", "")[:6]
+                    # seller_name already extracted by _parse_html_item via poly-component__seller
+                    # Use seller_store as seller_id key (normalized)
+                    store = parsed.get("seller_name", "").strip()
+                    parsed["seller_id"] = re.sub(r"\s+", "_", store.lower())[:32] if store else parsed.get("sku_id", "")[:12]
                     competitors.append(parsed)
 
         except Exception as exc:

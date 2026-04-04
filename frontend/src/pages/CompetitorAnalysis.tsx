@@ -339,10 +339,10 @@ export default function CompetitorAnalysis() {
                           {gap.competitor_seller_name}
                         </td>
                         <td className="px-4 py-3 text-center font-semibold text-text-primary">
-                          {gap.estimated_monthly_sales.toLocaleString('pt-BR')}
+                          {(gap.estimated_monthly_sales ?? 0).toLocaleString('pt-BR')}
                         </td>
                         <td className="px-4 py-3 font-semibold text-text-primary">
-                          {gap.price.toLocaleString('pt-BR', {
+                          {(gap.price ?? 0).toLocaleString('pt-BR', {
                             style: 'currency',
                             currency: 'BRL',
                           })}

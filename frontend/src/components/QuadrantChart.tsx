@@ -64,13 +64,13 @@ export default function QuadrantChart({ data, onPointClick, highlightSeller }: P
           <div className="flex justify-between gap-4">
             <span>Preço:</span>
             <span className="text-text-primary font-medium">
-              {point.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              {(point.price ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
             </span>
           </div>
           <div className="flex justify-between gap-4">
             <span>Volume/mês:</span>
             <span className="text-text-primary font-medium">
-              {point.volume.toLocaleString('pt-BR')}
+              {(point.volume ?? 0).toLocaleString('pt-BR')}
             </span>
           </div>
           <div className="flex justify-between gap-4">

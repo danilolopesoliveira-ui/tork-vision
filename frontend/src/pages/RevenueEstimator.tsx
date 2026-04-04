@@ -176,13 +176,13 @@ export default function RevenueEstimator() {
       header: 'Preço Médio',
       sortable: true,
       render: (row: SkuRevenue) =>
-        row.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+        (row.price ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
     },
     {
       key: 'estimated_monthly_sales',
       header: 'Vol. Est.',
       sortable: true,
-      render: (row: SkuRevenue) => row.estimated_monthly_sales.toLocaleString('pt-BR'),
+      render: (row: SkuRevenue) => (row.estimated_monthly_sales ?? 0).toLocaleString('pt-BR'),
     },
     {
       key: 'estimated_revenue',
@@ -190,7 +190,7 @@ export default function RevenueEstimator() {
       sortable: true,
       render: (row: SkuRevenue) => (
         <span className="font-semibold text-text-primary">
-          {row.estimated_revenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          {(row.estimated_revenue ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
         </span>
       ),
     },
@@ -405,7 +405,7 @@ export default function RevenueEstimator() {
                         )}
                       </td>
                       <td className="py-2 px-3 text-right font-semibold text-text-primary">
-                        {row.revenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        {(row.revenue ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                       </td>
                       <td className="py-2 px-3 text-right">
                         <span
