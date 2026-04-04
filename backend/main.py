@@ -1435,15 +1435,30 @@ async def debug_resolve_nickname(nickname: str):
         except Exception as exc:
             return {"error": str(exc)}
 
+    async def _safe_html(url: str):
+        try:
+            resp = await scraper._get(url)
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(resp.text, "lxml")
+            items = soup.select("li.ui-search-layout__item")
+            title = soup.title.get_text() if soup.title else ""
+            sample = []
+            for el in items[:3]:
+                t = el.select_one("[class*=poly-component__title],[class*=ui-search-item__title]")
+                sample.append(t.get_text(strip=True)[:60] if t else "no title")
+            return {"status": resp.status_code, "items_found": len(items), "page_title": title, "sample": sample}
+        except Exception as exc:
+            return {"error": str(exc)}
+
     s1 = await _safe_json(f"{api_base}/sites/MLB/search?nickname={_up.quote(nickname)}&limit=2")
     s2 = await _safe_json(f"{api_base}/users/search?nickname={_up.quote(nickname)}")
     resolved = await scraper._resolve_nickname_to_id(nickname)
-    user_info = await _safe_json(f"{api_base}/users/{resolved}") if resolved else None
+    store_html = await _safe_html(f"https://lista.mercadolivre.com.br/loja/{_up.quote(nickname)}/")
     await scraper.close()
     return {
         "nickname": nickname,
         "resolved_id": resolved,
         "strategy1_items_search": s1,
         "strategy2_users_search": s2,
-        "user_info": user_info,
+        "store_page_html_scrape": store_html,
     }
