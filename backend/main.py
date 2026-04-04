@@ -584,8 +584,71 @@ async def _run_analysis_job(job_id: str, url: str) -> None:
             _jobs[job_id]["step"] = f"Coletando SKUs de {seller_name}..."
 
             skus_raw = await scraper.get_seller_skus(str(seller_id_raw), max_pages=5, store_url=url)
+            _jobs[job_id]["progress"] = 0.55
+            _jobs[job_id]["step"] = "Buscando concorrentes reais no marketplace..."
+
+            # Search ML for sellers that sell similar products (real competitors)
+            competitor_sellers_raw: dict[str, dict] = {}  # seller_id -> info
+            sample_skus = [s for s in skus_raw[:5] if s.get("title")]
+            for s in sample_skus:
+                try:
+                    comp_skus = await scraper.get_sku_competitors(s.get("sku_id", ""), title=s.get("title", ""))
+                    for cs in comp_skus:
+                        csid = cs.get("seller_id") or cs.get("sku_id", "")[:6]
+                        if csid and csid != str(seller_id_raw):
+                            if csid not in competitor_sellers_raw:
+                                competitor_sellers_raw[csid] = {"skus": [], "name": cs.get("seller_name", csid)}
+                            competitor_sellers_raw[csid]["skus"].append(cs)
+                except Exception as exc:
+                    logger.warning("Competitor search failed for '%s': %s", s.get("title", "")[:40], exc)
+
+            # Persist competitor sellers and their SKUs
+            for csid, cinfo in list(competitor_sellers_raw.items())[:5]:
+                existing = await db.execute(select(Seller).where(Seller.seller_id == csid))
+                comp_seller = existing.scalars().first()
+                if not comp_seller:
+                    comp_seller = Seller(
+                        id=str(uuid.uuid4()),
+                        seller_id=csid,
+                        seller_name=cinfo["name"],
+                        marketplace=marketplace,
+                        store_url="",
+                        total_skus=len(cinfo["skus"]),
+                        categories=[],
+                        avg_rating=0.0,
+                        avg_price=0.0,
+                        is_target=False,
+                        created_at=datetime.now(timezone.utc),
+                        updated_at=datetime.now(timezone.utc),
+                    )
+                    db.add(comp_seller)
+                    await db.flush()
+                for cs in cinfo["skus"]:
+                    db.add(SKU(
+                        id=str(uuid.uuid4()),
+                        sku_id=cs.get("sku_id", ""),
+                        ean=cs.get("ean"),
+                        title=cs.get("title", ""),
+                        category=cs.get("category", ""),
+                        subcategory="",
+                        seller_id=comp_seller.id,
+                        seller_name=comp_seller.seller_name,
+                        price_current=float(cs.get("price_current", 0)),
+                        price_original=cs.get("price_original"),
+                        rating=float(cs.get("rating", 0)),
+                        review_count=int(cs.get("review_count", 0)),
+                        recent_reviews_30d=int(cs.get("recent_reviews_30d", 0)),
+                        sales_rank=None,
+                        badges=cs.get("badges", []),
+                        marketplace=marketplace,
+                        last_updated=datetime.now(timezone.utc),
+                        estimated_monthly_sales=_revenue_estimator.estimate_monthly_sales(cs),
+                        stock_status=cs.get("stock_status", "in_stock"),
+                        created_at=datetime.now(timezone.utc),
+                    ))
+
             _jobs[job_id]["progress"] = 0.60
-            _jobs[job_id]["step"] = "Calculando métricas e concorrentes..."
+            _jobs[job_id]["step"] = "Calculando métricas..."
 
             prices: list[float] = []
             ratings: list[float] = []

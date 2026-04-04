@@ -547,25 +547,44 @@ class MercadoLivreScraper(BaseScraper):
             "thumbnail": item.get("thumbnail", ""),
         }
 
-    async def get_sku_competitors(self, sku_id: str) -> list[dict[str, Any]]:
-        """Find other sellers offering the same item."""
+    async def get_sku_competitors(self, sku_id: str, title: str = "") -> list[dict[str, Any]]:
+        """Find other sellers offering the same item via HTML search (no auth needed)."""
         competitors: list[dict[str, Any]] = []
+        search_title = title
         try:
-            # Fetch main item to get title for search
-            item_url = f"{self._API_BASE}/items/{sku_id}"
-            data = await self._get_json(item_url)
-            await asyncio.sleep(self._rate_limit)
-            title = data.get("title", "")
-            if not title:
+            if not search_title and sku_id:
+                # Try to get title from item page HTML
+                item_page = f"https://www.mercadolivre.com.br/p/{sku_id}"
+                try:
+                    resp = await self._get(item_page)
+                    soup = BeautifulSoup(resp.text, "lxml")
+                    h1 = soup.select_one("h1.ui-pdp-title, h1[class*='pdp-title']")
+                    if h1:
+                        search_title = h1.get_text(strip=True)
+                except Exception:
+                    pass
+
+            if not search_title:
                 return competitors
 
-            q_encoded = urllib.parse.quote(title)
-            search_url = f"{self._API_BASE}/sites/MLB/search?q={q_encoded}&limit=10"
-            results = await self._get_json(search_url)
+            # Search ML website for this title
+            q_encoded = urllib.parse.quote(search_title[:80])
+            search_url = f"https://lista.mercadolivre.com.br/{q_encoded}"
+            resp = await self._get(search_url)
             await asyncio.sleep(self._rate_limit)
-            for item in results.get("results", []):
-                if item.get("id") != sku_id:
-                    competitors.append(self._parse_ml_item(item))
+
+            soup = BeautifulSoup(resp.text, "lxml")
+            items = soup.select("li.ui-search-layout__item")[:10]
+
+            for el in items:
+                parsed = self._parse_html_item(el)
+                if parsed and parsed.get("sku_id") != sku_id:
+                    # Try to extract seller info from element
+                    seller_el = el.select_one("[class*='seller'], [class*='store-name']")
+                    parsed["seller_name"] = seller_el.get_text(strip=True) if seller_el else ""
+                    parsed["seller_id"] = parsed.get("sku_id", "")[:6]
+                    competitors.append(parsed)
+
         except Exception as exc:
             logger.warning("ML get_sku_competitors error: %s", exc)
         return competitors
