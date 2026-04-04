@@ -322,43 +322,12 @@ class MercadoLivreScraper(BaseScraper):
             return {"seller_id": numeric_id, "marketplace": self.marketplace, "store_url": store_url}
 
     async def get_seller_skus(self, seller_id: str, max_pages: int = 20, store_url: str = "") -> list[dict[str, Any]]:
-        """Fetch all listings for a seller. Tries the JSON API first; falls back to HTML scraping."""
-        results: list[dict[str, Any]] = []
-        offset = 0
-        limit = 50
-        api_blocked = False
-
-        for _ in range(max_pages):
-            url = (
-                f"{self._API_BASE}/sites/MLB/search"
-                f"?seller_id={seller_id}&offset={offset}&limit={limit}"
-            )
-            try:
-                resp = await self._get(url)
-                await asyncio.sleep(self._rate_limit)
-                if resp.status_code == 403:
-                    logger.warning("ML API blocked (403) for seller %s — switching to HTML scrape", seller_id)
-                    api_blocked = True
-                    break
-                data = resp.json() if hasattr(resp, "json") and callable(resp.json) else {}
-            except Exception as exc:
-                logger.warning("ML get_seller_skus page error: %s", exc)
-                break
-
-            items = data.get("results", [])
-            if not items:
-                break
-
-            for item in items:
-                results.append(self._parse_ml_item(item))
-
-            if len(items) < limit:
-                break
-            offset += limit
-
-        if api_blocked or not results:
-            logger.info("Falling back to HTML scraping for seller_id=%s store_url=%s", seller_id, store_url)
-            results = await self._html_scrape_seller_skus(store_url or seller_id, max_pages=min(max_pages, 5))
+        """Fetch all listings for a seller via HTML scraping (API requires OAuth)."""
+        # Use HTML scraping directly — ML API requires OAuth token which is not available
+        scrape_target = store_url or seller_id
+        logger.info("Fetching SKUs via HTML scrape for seller_id=%s store_url=%s", seller_id, scrape_target)
+        results = await self._html_scrape_seller_skus(scrape_target, max_pages=min(max_pages, 5))
+        api_blocked = True  # flag to skip API-based enrichment below
 
         # Enrich the first 10 items with real review data (skip if API is blocked)
         if not api_blocked:

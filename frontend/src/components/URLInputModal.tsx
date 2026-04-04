@@ -72,12 +72,44 @@ export default function URLInputModal({ onClose }: Props) {
     return () => clearInterval(intervalRef.current!)
   }, [job, setSellers, setSelectedSellerId])
 
+  const resolveMlNickname = async (storeUrl: string): Promise<string> => {
+    // Extract nickname from /loja/{nickname} URL
+    const match = storeUrl.match(/\/loja\/([^/?#]+)/)
+    if (!match) return storeUrl
+    const nickname = match[1]
+    if (/^\d+$/.test(nickname)) return storeUrl
+    // Call ML API directly from browser (not blocked)
+    try {
+      const res = await fetch(
+        `https://api.mercadolibre.com/sites/MLB/search?nickname=${encodeURIComponent(nickname)}&limit=1`
+      )
+      const data = await res.json()
+      const sellerId = data?.results?.[0]?.seller?.id
+      if (sellerId) {
+        return `https://lista.mercadolivre.com.br/loja/${nickname}/?seller_id=${sellerId}`
+      }
+    } catch {}
+    // Fallback: users search
+    try {
+      const res = await fetch(
+        `https://api.mercadolibre.com/users/search?nickname=${encodeURIComponent(nickname)}`
+      )
+      const data = await res.json()
+      const sellerId = data?.results?.[0]?.id
+      if (sellerId) {
+        return `https://lista.mercadolivre.com.br/loja/${nickname}/?seller_id=${sellerId}`
+      }
+    } catch {}
+    return storeUrl
+  }
+
   const handleSubmit = async () => {
     if (!url.trim()) return
     setError(null)
     setStep(0)
     try {
-      const newJob = await startAnalysis(url.trim())
+      const resolvedUrl = await resolveMlNickname(url.trim())
+      const newJob = await startAnalysis(resolvedUrl)
       // If already analyzed, backend returns job_id: "existing"
       if (newJob.job_id === 'existing') {
         const sellers = await getSellers()
