@@ -224,8 +224,11 @@ class TrendProductSchema(BaseModel):
 
 @app.on_event("startup")
 async def startup_event() -> None:
+    import os
     await init_db()
-    await populate_demo_data()
+    # Skip demo data when ML credentials are configured (production mode)
+    if not os.environ.get("ML_APP_ID"):
+        await populate_demo_data()
     _start_scheduler()
 
 
