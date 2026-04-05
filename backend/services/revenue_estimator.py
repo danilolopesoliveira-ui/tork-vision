@@ -41,10 +41,30 @@ class RevenueEstimator:
                 return mult
         return self.REVIEW_MULTIPLIERS["default"]
 
+    # Price-based monthly sales estimate when no review data is available
+    _PRICE_SALES_MAP: list[tuple[float, int]] = [
+        (50,   200),   # < R$50 → 200 un/mês
+        (150,  120),   # R$50–150 → 120 un/mês
+        (300,   60),   # R$150–300 → 60 un/mês
+        (600,   30),   # R$300–600 → 30 un/mês
+        (1200,  15),   # R$600–1200 → 15 un/mês
+        (3000,   8),   # R$1200–3000 → 8 un/mês
+        (float("inf"), 3),  # > R$3000 → 3 un/mês
+    ]
+
+    def _price_based_sales(self, price: float, category: str) -> int:
+        """Estimate monthly sales from price bracket when review data is unavailable."""
+        for threshold, sales in self._PRICE_SALES_MAP:
+            if price < threshold:
+                return sales
+        return 3
+
     def estimate_monthly_sales(self, sku: dict[str, Any]) -> int:
         """
-        Estimate monthly unit sales using recent_reviews_30d × category multiplier.
-        Falls back to review_count-based heuristic if recent data is absent.
+        Estimate monthly unit sales.
+        1. recent_reviews_30d × category multiplier (best signal)
+        2. total review count / 24 × multiplier
+        3. Price-bracket heuristic (when no review data at all)
         """
         recent = sku.get("recent_reviews_30d", 0) or 0
         category = sku.get("category", "")
@@ -53,13 +73,17 @@ class RevenueEstimator:
         if recent > 0:
             return int(recent * multiplier)
 
-        # Fallback: derive from total review count assuming 24-month product life
         total_reviews = sku.get("review_count", 0) or 0
         if total_reviews > 0:
             monthly_reviews_estimate = total_reviews / 24
             return int(monthly_reviews_estimate * multiplier)
 
-        return 0
+        # Fallback: price-based estimate
+        price = float(sku.get("price_current", 0) or sku.get("price", 0) or 0)
+        if price > 0:
+            return self._price_based_sales(price, category)
+
+        return 5
 
     async def estimate_seller_revenue(
         self,

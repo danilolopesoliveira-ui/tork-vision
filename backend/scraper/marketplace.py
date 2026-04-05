@@ -280,10 +280,41 @@ class MercadoLivreScraper(BaseScraper):
     async def _resolve_nickname_to_id(self, nickname: str) -> str | None:
         """Resolve a ML store nickname to a numeric seller ID.
 
-        Strategy 1: items search API — works when the seller has active listings.
-        Strategy 2: users search API — works even when the items search returns empty.
+        Strategy 1 (most reliable): scrape store page, extract first MLB item ID,
+          call /items/{id} API to get the authoritative seller_id.
+        Strategy 2: /sites/MLB/search?nickname= — authenticated items search.
+        Strategy 3: /users/search?nickname= — authenticated users search.
         """
-        # Strategy 1: items search (authenticated)
+        # Strategy 1: scrape store page → extract MLB item link → lookup /items/{id}
+        store_url = f"https://lista.mercadolivre.com.br/loja/{urllib.parse.quote(nickname)}/"
+        try:
+            resp = await self._get(store_url)
+            html = resp.text if hasattr(resp, "text") else ""
+            soup = BeautifulSoup(html, "lxml")
+
+            # Collect all href links containing MLB IDs
+            mlb_ids: list[str] = []
+            for a in soup.find_all("a", href=True):
+                m = re.search(r'(MLB\d+)', a["href"])
+                if m:
+                    mlb_ids.append(m.group(1))
+
+            # Also scan raw HTML for MLB IDs
+            mlb_ids += re.findall(r'MLB\d{6,}', html)
+            mlb_ids = list(dict.fromkeys(mlb_ids))[:5]  # unique, first 5
+
+            for mlb_id in mlb_ids:
+                await asyncio.sleep(self._rate_limit)
+                item_data = await self._api_get_json(f"{self._API_BASE}/items/{mlb_id}")
+                if item_data and item_data.get("seller_id"):
+                    sid = str(item_data["seller_id"])
+                    logger.info("Resolved nickname %s → %s via item %s", nickname, sid, mlb_id)
+                    return sid
+        except Exception as exc:
+            logger.warning("Nickname store-scrape failed for %s: %s", nickname, exc)
+
+        # Strategy 2: items search with nickname filter (authenticated)
+        await asyncio.sleep(self._rate_limit)
         url = f"{self._API_BASE}/sites/MLB/search?nickname={urllib.parse.quote(nickname)}&limit=1"
         try:
             data = await self._api_get_json(url)
@@ -296,7 +327,7 @@ class MercadoLivreScraper(BaseScraper):
         except Exception as exc:
             logger.warning("Nickname items-search failed for %s: %s", nickname, exc)
 
-        # Strategy 2: users search API (authenticated)
+        # Strategy 3: users search API (authenticated)
         await asyncio.sleep(self._rate_limit)
         url2 = f"{self._API_BASE}/users/search?nickname={urllib.parse.quote(nickname)}"
         try:
@@ -309,29 +340,6 @@ class MercadoLivreScraper(BaseScraper):
                     return sid
         except Exception as exc:
             logger.warning("Nickname users-search failed for %s: %s", nickname, exc)
-
-        # Strategy 3: parse the store page HTML for a numeric seller ID
-        await asyncio.sleep(self._rate_limit)
-        store_url = f"https://lista.mercadolivre.com.br/loja/{urllib.parse.quote(nickname)}/"
-        try:
-            resp = await self._get(store_url)
-            html = resp.text if hasattr(resp, "text") else ""
-            # Look for seller/user numeric IDs embedded in JS or data attributes
-            for pattern in [
-                r'"seller_id"\s*:\s*"?(\d+)"?',
-                r'"sellerId"\s*:\s*"?(\d+)"?',
-                r'"user_id"\s*:\s*"?(\d+)"?',
-                r'seller_id=(\d+)',
-                r'/users/(\d+)',
-                r'"id"\s*:\s*(\d{6,})',  # numeric IDs >= 6 digits
-            ]:
-                m = re.search(pattern, html)
-                if m:
-                    sid = m.group(1)
-                    logger.info("Resolved nickname %s → %s (HTML scrape)", nickname, sid)
-                    return sid
-        except Exception as exc:
-            logger.warning("Nickname HTML-scrape failed for %s: %s", nickname, exc)
 
         logger.warning("Could not resolve nickname to numeric ID: %s", nickname)
         return None

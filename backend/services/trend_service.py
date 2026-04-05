@@ -155,8 +155,13 @@ class TrendService:
                 for i, e in enumerate(ranked)
             ]
 
-        # Fallback: current snapshot
-        stmt2 = select(SKU).where(SKU.seller_id == seller_id)
+        # Fallback: current snapshot — seller_id here is marketplace ID, look up internal id
+        from models.seller import Seller as SellerModel
+        from sqlalchemy import select as sa_select2
+        seller_row = await db.execute(sa_select2(SellerModel).where(SellerModel.seller_id == seller_id))
+        seller_obj = seller_row.scalars().first()
+        internal_id = seller_obj.id if seller_obj else seller_id
+        stmt2 = select(SKU).where(SKU.seller_id == internal_id)
         res2 = await db.execute(stmt2)
         skus = res2.scalars().all()
 
