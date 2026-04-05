@@ -76,9 +76,17 @@ class RankingService:
         limit: int = 20,
         category: str | None = None,
         marketplace: str | None = None,
+        seller_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return top products by adhesion score."""
+        from models.seller import Seller as SellerModel
         stmt = select(SKU)
+        if seller_id:
+            # Resolve marketplace seller_id → internal UUID
+            sel_res = await db.execute(select(SellerModel).where(SellerModel.seller_id == seller_id))
+            sel = sel_res.scalars().first()
+            if sel:
+                stmt = stmt.where(SKU.seller_id == sel.id)
         if category:
             stmt = stmt.where(SKU.category.ilike(f"%{category}%"))
         if marketplace:

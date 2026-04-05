@@ -939,6 +939,7 @@ async def delete_seller(seller_id: str, db: AsyncSession = Depends(get_db)):
     if not seller:
         raise HTTPException(status_code=404, detail="Seller not found")
     await db.delete(seller)
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -1271,12 +1272,13 @@ async def get_dashboard_alerts(seller_id: str, db: AsyncSession = Depends(get_db
 @app.get("/api/rankings/top-products")
 async def get_top_products(
     limit: int = Query(20, ge=1, le=100),
+    seller_id: str | None = Query(None),
     category: str | None = Query(None),
     marketplace: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     """Return top products ranked by adhesion score."""
-    products = await _ranking_service.get_top_products(db, limit=limit, category=category, marketplace=marketplace)
+    products = await _ranking_service.get_top_products(db, limit=limit, seller_id=seller_id, category=category, marketplace=marketplace)
     return {"total": len(products), "items": products}
 
 
@@ -1317,26 +1319,6 @@ PERIOD_MAP = {
 }
 
 
-@app.get("/api/revenue/{seller_id}")
-async def get_seller_revenue(
-    seller_id: str,
-    period: str = Query("monthly", pattern="^(monthly|quarterly|semiannual|annual)$"),
-    db: AsyncSession = Depends(get_db),
-):
-    """Return revenue estimates for a seller."""
-    seller_stmt = select(Seller).where(Seller.seller_id == seller_id)
-    seller_res = await db.execute(seller_stmt)
-    seller = seller_res.scalars().first()
-    if not seller:
-        raise HTTPException(status_code=404, detail="Seller not found")
-
-    period_days = PERIOD_MAP.get(period, 30)
-    data = await _revenue_estimator.estimate_seller_revenue(db, seller.id, period_days=period_days)
-    top_skus = await _revenue_estimator.get_top_revenue_skus(db, seller.id, limit=20)
-    data["top_revenue_skus"] = top_skus
-    return data
-
-
 @app.get("/api/revenue/compare")
 async def compare_revenue(
     seller_ids: str = Query(..., description="Comma-separated seller IDs"),
@@ -1360,6 +1342,26 @@ async def compare_revenue(
     period_days = PERIOD_MAP.get(period, 30)
     comparison = await _revenue_estimator.compare_sellers_revenue(db, internal_ids, period_days=period_days)
     return comparison
+
+
+@app.get("/api/revenue/{seller_id}")
+async def get_seller_revenue(
+    seller_id: str,
+    period: str = Query("monthly", pattern="^(monthly|quarterly|semiannual|annual)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return revenue estimates for a seller."""
+    seller_stmt = select(Seller).where(Seller.seller_id == seller_id)
+    seller_res = await db.execute(seller_stmt)
+    seller = seller_res.scalars().first()
+    if not seller:
+        raise HTTPException(status_code=404, detail="Seller not found")
+
+    period_days = PERIOD_MAP.get(period, 30)
+    data = await _revenue_estimator.estimate_seller_revenue(db, seller.id, period_days=period_days)
+    top_skus = await _revenue_estimator.get_top_revenue_skus(db, seller.id, limit=20)
+    data["top_revenue_skus"] = top_skus
+    return data
 
 
 # ---------------------------------------------------------------------------
