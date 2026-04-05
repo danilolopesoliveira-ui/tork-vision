@@ -630,17 +630,70 @@ class MercadoLivreScraper(BaseScraper):
             "thumbnail": item.get("thumbnail", ""),
         }
 
+    async def _get_similar_items(self, sku_id: str) -> list[dict[str, Any]]:
+        """
+        Fetch similar items via ML API: /items/{id}/related and /items/{id}/similar.
+        Returns parsed competitor SKUs with real seller_id and seller_name.
+        """
+        results: list[dict[str, Any]] = []
+        if not sku_id or not sku_id.startswith("MLB"):
+            return results
+
+        for endpoint in [
+            f"{self._API_BASE}/items/{sku_id}/related",
+            f"{self._API_BASE}/items/{sku_id}/similar",
+        ]:
+            try:
+                data = await self._api_get_json(endpoint)
+                await asyncio.sleep(self._rate_limit)
+                # Both endpoints return {"results": [...]} or a list directly
+                items = data.get("results", data) if isinstance(data, dict) else data
+                if not isinstance(items, list):
+                    continue
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    item_id = item.get("id", "")
+                    if item_id == sku_id:
+                        continue
+                    seller = item.get("seller", {})
+                    seller_id = str(seller.get("id", ""))
+                    seller_name = seller.get("nickname", "")
+                    if not seller_id:
+                        continue
+                    parsed = self._parse_ml_item(item)
+                    parsed["seller_id"] = seller_id
+                    parsed["seller_name"] = seller_name
+                    results.append(parsed)
+                if results:
+                    logger.info("Similar items for %s via %s: %d", sku_id, endpoint, len(results))
+                    break
+            except Exception as exc:
+                logger.warning("Similar items fetch failed for %s (%s): %s", sku_id, endpoint, exc)
+
+        return results
+
     async def get_sku_competitors(self, sku_id: str, title: str = "") -> list[dict[str, Any]]:
-        """Find competitors for a SKU via ML API (OAuth) or HTML fallback."""
+        """
+        Find competitor sellers for a SKU.
+        Strategy 1: /items/{id}/related and /items/{id}/similar (most accurate).
+        Strategy 2: /sites/MLB/search?q={title} — authenticated keyword search.
+        Strategy 3: HTML keyword search fallback.
+        """
         competitors: list[dict[str, Any]] = []
-        search_title = title
 
         try:
+            # Strategy 1: similar/related items (same product, other sellers)
+            if sku_id and sku_id.startswith("MLB"):
+                similar = await self._get_similar_items(sku_id)
+                if similar:
+                    return similar
+
             token = await _get_ml_access_token(self._client)
 
-            if token and search_title:
-                # Use authenticated API search — returns real seller IDs and sales data
-                q_encoded = urllib.parse.quote(search_title[:80])
+            # Strategy 2: keyword search via authenticated API
+            if token and title:
+                q_encoded = urllib.parse.quote(title[:80])
                 url = f"{self._API_BASE}/sites/MLB/search?q={q_encoded}&limit=20"
                 data = await self._api_get_json(url)
                 await asyncio.sleep(self._rate_limit)
@@ -650,34 +703,31 @@ class MercadoLivreScraper(BaseScraper):
                     parsed = self._parse_ml_item(item)
                     seller = item.get("seller", {})
                     parsed["seller_id"] = str(seller.get("id", ""))
-                    parsed["seller_name"] = seller.get("nickname", parsed.get("seller_name", ""))
+                    parsed["seller_name"] = seller.get("nickname", "")
                     if parsed["seller_id"]:
                         competitors.append(parsed)
-                return competitors
+                if competitors:
+                    return competitors
 
-            # Fallback: HTML search
-            if not search_title and sku_id:
-                item_page = f"https://www.mercadolivre.com.br/p/{sku_id}"
+            # Strategy 3: HTML keyword search fallback
+            if not title and sku_id:
                 try:
-                    resp = await self._get(item_page)
+                    resp = await self._get(f"https://www.mercadolivre.com.br/p/{sku_id}")
                     soup = BeautifulSoup(resp.text, "lxml")
                     h1 = soup.select_one("h1.ui-pdp-title, h1[class*='pdp-title']")
                     if h1:
-                        search_title = h1.get_text(strip=True)
+                        title = h1.get_text(strip=True)
                 except Exception:
                     pass
 
-            if not search_title:
+            if not title:
                 return competitors
 
-            q_encoded = urllib.parse.quote(search_title[:80])
-            search_url = f"https://lista.mercadolivre.com.br/{q_encoded}"
-            resp = await self._get(search_url)
+            q_encoded = urllib.parse.quote(title[:80])
+            resp = await self._get(f"https://lista.mercadolivre.com.br/{q_encoded}")
             await asyncio.sleep(self._rate_limit)
-
             soup = BeautifulSoup(resp.text, "lxml")
-            items = soup.select("li.ui-search-layout__item")[:10]
-            for el in items:
+            for el in soup.select("li.ui-search-layout__item")[:10]:
                 parsed = self._parse_html_item(el)
                 if parsed and parsed.get("sku_id") != sku_id:
                     store = parsed.get("seller_name", "").strip()
@@ -686,6 +736,7 @@ class MercadoLivreScraper(BaseScraper):
 
         except Exception as exc:
             logger.warning("ML get_sku_competitors error: %s", exc)
+
         return competitors
 
 
