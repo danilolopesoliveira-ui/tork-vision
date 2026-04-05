@@ -62,23 +62,23 @@ class RevenueEstimator:
     def estimate_monthly_sales(self, sku: dict[str, Any]) -> int:
         """
         Estimate monthly unit sales.
-        1. recent_reviews_30d × category multiplier (best signal)
-        2. total review count / 24 × multiplier
-        3. Price-bracket heuristic (when no review data at all)
+        1. recent_reviews_30d × multiplier — only if review_count > 0 (real data)
+        2. total review_count / 24 × multiplier
+        3. Price-bracket heuristic (HTML-scraped products have no review data)
         """
+        review_count = sku.get("review_count", 0) or 0
         recent = sku.get("recent_reviews_30d", 0) or 0
         category = sku.get("category", "")
         multiplier = self._get_multiplier(category)
 
-        if recent > 0:
+        # Only trust recent_reviews_30d when we have real review data
+        if review_count > 0 and recent > 0:
             return int(recent * multiplier)
 
-        total_reviews = sku.get("review_count", 0) or 0
-        if total_reviews > 0:
-            monthly_reviews_estimate = total_reviews / 24
-            return int(monthly_reviews_estimate * multiplier)
+        if review_count > 0:
+            return int((review_count / 24) * multiplier)
 
-        # Fallback: price-based estimate
+        # HTML-scraped SKUs: use price-bracket heuristic
         price = float(sku.get("price_current", 0) or sku.get("price", 0) or 0)
         if price > 0:
             return self._price_based_sales(price, category)

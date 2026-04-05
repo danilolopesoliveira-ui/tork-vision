@@ -980,12 +980,24 @@ async def get_competitors(seller_id: str, db: AsyncSession = Depends(get_db)):
 
     competitor_result = _competitor_finder.find_competitors(seller.id, skus_flat)
 
+    # Resolve internal UUIDs → marketplace seller_ids for API response
+    all_competitor_internal_ids = [
+        c.seller_id for c in competitor_result.direct_competitors + competitor_result.indirect_competitors
+    ]
+    id_map: dict[str, str] = {}
+    if all_competitor_internal_ids:
+        from sqlalchemy import text as sa_text
+        resolve_stmt = select(Seller).where(Seller.id.in_(all_competitor_internal_ids))
+        resolve_res = await db.execute(resolve_stmt)
+        for s in resolve_res.scalars().all():
+            id_map[s.id] = s.seller_id
+
     return {
         "target_seller_id": seller_id,
         "total_target_skus": competitor_result.total_target_skus,
         "direct_competitors": [
             {
-                "seller_id": c.seller_id,
+                "seller_id": id_map.get(c.seller_id, c.seller_id),
                 "seller_name": c.seller_name,
                 "overlap_count": c.overlap_count,
                 "overlap_pct": c.overlap_pct,
@@ -996,7 +1008,7 @@ async def get_competitors(seller_id: str, db: AsyncSession = Depends(get_db)):
         ],
         "indirect_competitors": [
             {
-                "seller_id": c.seller_id,
+                "seller_id": id_map.get(c.seller_id, c.seller_id),
                 "seller_name": c.seller_name,
                 "overlap_count": c.overlap_count,
                 "overlap_pct": c.overlap_pct,

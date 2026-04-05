@@ -40,15 +40,23 @@ class TrendService:
 
         trending: list[dict[str, Any]] = []
         for sku in skus:
-            monthly_avg = (sku.review_count / 24) if sku.review_count > 0 else 0
-            recent = sku.recent_reviews_30d or 0
-            growth_ratio = (recent / (monthly_avg + 1)) if monthly_avg >= 0 else 0
+            d = _ranking_service._sku_dict(sku)
+            d["adhesion_score"] = _ranking_service.calculate_adhesion_score(d)
 
-            if growth_ratio >= 1.2:  # 20%+ above average = trending
-                d = _ranking_service._sku_dict(sku)
-                d["growth_ratio"] = round(growth_ratio, 3)
-                d["adhesion_score"] = _ranking_service.calculate_adhesion_score(d)
-                trending.append(d)
+            if sku.review_count > 0:
+                monthly_avg = sku.review_count / 24
+                recent = sku.recent_reviews_30d or 0
+                growth_ratio = recent / (monthly_avg + 1)
+                if growth_ratio >= 1.2:
+                    d["growth_ratio"] = round(growth_ratio, 3)
+                    trending.append(d)
+            else:
+                # HTML-scraped products: use adhesion_score + estimated sales as proxy
+                adhesion = d["adhesion_score"]
+                est_sales = sku.estimated_monthly_sales or 0
+                if adhesion >= 0.25 and est_sales >= 10:
+                    d["growth_ratio"] = round(adhesion * 2, 3)
+                    trending.append(d)
 
         trending.sort(key=lambda x: x["growth_ratio"], reverse=True)
         return trending[:50]
@@ -148,7 +156,7 @@ class TrendService:
                     "sku_id": e.sku_id,
                     "title": skus_map.get(e.sku_id, type("S", (), {"title": "—"})()).title,
                     "estimated_monthly_sales": e.estimated_monthly_sales,
-                    "estimated_revenue": round(e.estimated_revenue, 2),
+                    "revenue": round(e.estimated_revenue, 2),
                     "category": e.category,
                     "period": f"{year}-{month:02d}",
                 }
@@ -182,11 +190,11 @@ class TrendService:
                 "sku_id": s.sku_id,
                 "title": s.title,
                 "estimated_monthly_sales": estimator.estimate_monthly_sales(
-                    {"recent_reviews_30d": s.recent_reviews_30d, "review_count": s.review_count, "category": s.category}
+                    {"recent_reviews_30d": s.recent_reviews_30d, "review_count": s.review_count, "category": s.category, "price_current": s.price_current}
                 ),
-                "estimated_revenue": round(
+                "revenue": round(
                     estimator.estimate_monthly_sales(
-                        {"recent_reviews_30d": s.recent_reviews_30d, "review_count": s.review_count, "category": s.category}
+                        {"recent_reviews_30d": s.recent_reviews_30d, "review_count": s.review_count, "category": s.category, "price_current": s.price_current}
                     ) * s.price_current,
                     2,
                 ),
