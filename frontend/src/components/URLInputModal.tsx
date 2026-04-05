@@ -57,7 +57,9 @@ export default function URLInputModal({ onClose }: Props) {
           const sellers = await getSellers()
           setSellers(sellers)
           if (updated.result?.seller_id) {
-            setSelectedSellerId(updated.result.seller_id)
+            // Use seller_id from result, but prefer the target seller from the list
+            const targetSeller = sellers.find((s) => s.is_target)
+            setSelectedSellerId(targetSeller?.seller_id ?? updated.result.seller_id)
           }
         } else if (updated.status === 'failed') {
           clearInterval(intervalRef.current!)

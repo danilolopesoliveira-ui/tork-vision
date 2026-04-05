@@ -558,7 +558,14 @@ async def _run_analysis_job(job_id: str, url: str) -> None:
             _jobs[job_id]["progress"] = 0.20
 
             seller_id_raw = seller_info.get("seller_id", url)
-            seller_name = seller_info.get("seller_name", str(seller_id_raw))
+
+            # If seller_id_raw is a full URL (resolution failed), extract clean nickname
+            if str(seller_id_raw).startswith("http"):
+                loja_m = re.search(r"/loja/([^/?#]+)", str(seller_id_raw))
+                seller_id_raw = loja_m.group(1) if loja_m else str(seller_id_raw)
+                logger.warning("seller_id fell back to URL, using nickname: %s", seller_id_raw)
+
+            seller_name = seller_info.get("seller_name") or str(seller_id_raw).replace("-", " ").title()
 
             # Upsert seller
             stmt = select(Seller).where(Seller.seller_id == str(seller_id_raw))
