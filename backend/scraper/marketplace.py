@@ -372,23 +372,27 @@ class MercadoLivreScraper(BaseScraper):
             logger.warning("Could not resolve a numeric seller ID from: %s", store_url)
             return {}
 
+        # Extract store nickname from URL to use as display name
+        loja_m = re.search(r"/loja/([^/?#]+)", store_url)
+        store_nickname = loja_m.group(1).replace("-", " ").title() if loja_m else None
+
         try:
             url = f"{self._API_BASE}/users/{numeric_id}"
             data = await self._api_get_json(url)
             await asyncio.sleep(self._rate_limit)
             if not data:
-                logger.warning("ML API returned empty for users/%s — using nickname as fallback", numeric_id)
-                loja_m = re.search(r"/loja/([^/?#]+)", store_url)
-                nickname_fallback = loja_m.group(1) if loja_m else numeric_id
+                logger.warning("ML API returned empty for users/%s — using store nickname as fallback", numeric_id)
                 return {
                     "seller_id": numeric_id,
-                    "seller_name": nickname_fallback,
+                    "seller_name": store_nickname or numeric_id,
                     "marketplace": self.marketplace,
                     "store_url": store_url,
                 }
+            # Prefer store URL nickname over ML account nickname
+            display_name = store_nickname or data.get("name") or data.get("nickname", "")
             return {
                 "seller_id": str(data.get("id", numeric_id)),
-                "seller_name": data.get("nickname", ""),
+                "seller_name": display_name,
                 "marketplace": self.marketplace,
                 "store_url": store_url,
                 "rating": data.get("seller_reputation", {}).get("level_id", ""),

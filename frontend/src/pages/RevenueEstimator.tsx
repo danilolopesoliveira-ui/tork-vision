@@ -137,8 +137,8 @@ export default function RevenueEstimator() {
   // Treemap data
   const treemapData = byCategory.slice(0, 10).map((c, i) => ({
     name: c.category,
-    size: c.total_revenue,
-    value: c.total_revenue,
+    size: c.estimated_revenue ?? c.total_revenue ?? 0,
+    value: c.estimated_revenue ?? c.total_revenue ?? 0,
     index: i,
   }))
 
@@ -146,8 +146,8 @@ export default function RevenueEstimator() {
   const comparisonData = (() => {
     if (!comparison?.sellers) return []
     return comparison.sellers.map((s) => ({
-      name: s.seller_name,
-      revenue: s.total_revenue,
+      name: s.seller_name || s.seller_id,
+      revenue: s.total_estimated_revenue ?? s.total_revenue ?? 0,
     }))
   })()
 

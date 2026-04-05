@@ -97,13 +97,19 @@ class RevenueEstimator:
 
         by_sku.sort(key=lambda x: x["estimated_period_revenue"], reverse=True)
 
+        # Add revenue_pct to each SKU row
+        for row in by_sku:
+            row["estimated_revenue"] = row["estimated_period_revenue"]
+            row["estimated_monthly_sales"] = row["estimated_period_sales"]
+            row["revenue_pct"] = round(row["estimated_period_revenue"] / total_revenue * 100, 1) if total_revenue else 0
+
         return {
             "seller_id": seller_id,
             "period_days": period_days,
             "total_estimated_revenue": round(total_revenue, 2),
             "by_sku": by_sku[:50],  # top 50
             "by_category": [
-                {"category": k, "estimated_revenue": round(v, 2)}
+                {"category": k, "estimated_revenue": round(v, 2), "total_revenue": round(v, 2)}
                 for k, v in sorted(by_category.items(), key=lambda i: i[1], reverse=True)
             ],
         }
@@ -115,13 +121,22 @@ class RevenueEstimator:
         period_days: int = 30,
     ) -> dict[str, Any]:
         """Compare estimated revenue across multiple sellers."""
+        from models.seller import Seller
+        from sqlalchemy import select as sa_select
+
         comparisons: list[dict[str, Any]] = []
 
         for sid in seller_ids:
             data = await self.estimate_seller_revenue(db, sid, period_days)
+            # Lookup seller display name
+            seller_row = await db.execute(sa_select(Seller).where(Seller.id == sid))
+            seller_obj = seller_row.scalars().first()
+            seller_name = seller_obj.seller_name if seller_obj else sid
             comparisons.append({
                 "seller_id": sid,
+                "seller_name": seller_name,
                 "total_estimated_revenue": data["total_estimated_revenue"],
+                "total_revenue": data["total_estimated_revenue"],
                 "by_category": data["by_category"],
             })
 
@@ -158,6 +173,7 @@ class RevenueEstimator:
             reverse=True,
         )[:limit]
 
+        total = sum(self.estimate_monthly_sales(self._to_dict(s)) * s.price_current for s in ranked)
         return [
             {
                 "sku_id": s.sku_id,
@@ -165,9 +181,9 @@ class RevenueEstimator:
                 "category": s.category,
                 "price": s.price_current,
                 "estimated_monthly_sales": self.estimate_monthly_sales(self._to_dict(s)),
-                "estimated_monthly_revenue": round(
-                    self.estimate_monthly_sales(self._to_dict(s)) * s.price_current, 2
-                ),
+                "estimated_monthly_revenue": round(self.estimate_monthly_sales(self._to_dict(s)) * s.price_current, 2),
+                "estimated_revenue": round(self.estimate_monthly_sales(self._to_dict(s)) * s.price_current, 2),
+                "revenue_pct": round(self.estimate_monthly_sales(self._to_dict(s)) * s.price_current / total * 100, 1) if total else 0,
                 "rating": s.rating,
                 "review_count": s.review_count,
             }

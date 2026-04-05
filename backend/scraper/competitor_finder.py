@@ -32,9 +32,9 @@ class CompetitorResult:
 
 
 class CompetitorFinder:
-    DIRECT_THRESHOLD = 0.15   # ≥15% SKU overlap
-    INDIRECT_THRESHOLD = 0.05  # ≥5% SKU overlap
-    TITLE_SIMILARITY_THRESHOLD = 0.80
+    DIRECT_THRESHOLD = 0.05    # ≥5% SKU overlap
+    INDIRECT_THRESHOLD = 0.01  # ≥1% SKU overlap
+    TITLE_SIMILARITY_THRESHOLD = 0.72
 
     def calculate_similarity_score(
         self,

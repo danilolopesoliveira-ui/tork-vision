@@ -590,46 +590,82 @@ async def _run_analysis_job(job_id: str, url: str) -> None:
             _jobs[job_id]["progress"] = 0.55
             _jobs[job_id]["step"] = "Buscando concorrentes reais no marketplace..."
 
-            # Search ML for sellers that sell similar products (real competitors)
-            competitor_sellers_raw: dict[str, dict] = {}  # seller_id -> info
-            sample_skus = [s for s in skus_raw[:5] if s.get("title")]
+            # Search ML for real competitor sellers: sample 1 SKU per category
+            competitor_sellers_raw: dict[str, dict] = {}  # seller_id -> {name, skus}
+            by_category_sample: dict[str, dict] = {}
+            for s in skus_raw:
+                cat = s.get("category", "Outros")
+                if cat not in by_category_sample and s.get("title"):
+                    by_category_sample[cat] = s
+            sample_skus = list(by_category_sample.values())[:8]  # up to 8 categories
+
             for s in sample_skus:
                 try:
                     comp_skus = await scraper.get_sku_competitors(s.get("sku_id", ""), title=s.get("title", ""))
                     for cs in comp_skus:
-                        csid = cs.get("seller_id") or cs.get("sku_id", "")[:6]
-                        if csid and csid != str(seller_id_raw):
-                            if csid not in competitor_sellers_raw:
-                                competitor_sellers_raw[csid] = {"skus": [], "name": cs.get("seller_name", csid)}
-                            competitor_sellers_raw[csid]["skus"].append(cs)
+                        csid = cs.get("seller_id", "")
+                        if not csid or csid == str(seller_id_raw):
+                            continue
+                        if csid not in competitor_sellers_raw:
+                            competitor_sellers_raw[csid] = {"skus": [], "name": cs.get("seller_name", csid)}
+                        competitor_sellers_raw[csid]["skus"].append(cs)
                 except Exception as exc:
                     logger.warning("Competitor search failed for '%s': %s", s.get("title", "")[:40], exc)
 
+            # For top competitor sellers, fetch their FULL catalog so overlap is accurate
+            top_competitor_ids = sorted(
+                competitor_sellers_raw.keys(),
+                key=lambda k: len(competitor_sellers_raw[k]["skus"]),
+                reverse=True,
+            )[:5]
+
+            for csid in top_competitor_ids:
+                if csid.isdigit():
+                    try:
+                        full_skus = await scraper.get_seller_skus(csid, max_pages=3)
+                        if full_skus:
+                            competitor_sellers_raw[csid]["skus"] = full_skus
+                            competitor_sellers_raw[csid]["name"] = (
+                                full_skus[0].get("seller_name") or competitor_sellers_raw[csid]["name"]
+                            )
+                            logger.info("Fetched %d SKUs for competitor seller_id=%s", len(full_skus), csid)
+                    except Exception as exc:
+                        logger.warning("Failed to fetch full catalog for competitor %s: %s", csid, exc)
+
             # Persist competitor sellers and their SKUs
-            for csid, cinfo in list(competitor_sellers_raw.items())[:5]:
+            for csid in top_competitor_ids:
+                cinfo = competitor_sellers_raw[csid]
                 existing = await db.execute(select(Seller).where(Seller.seller_id == csid))
                 comp_seller = existing.scalars().first()
                 if not comp_seller:
+                    comp_skus_list = cinfo["skus"]
+                    comp_prices = [float(c.get("price_current", 0)) for c in comp_skus_list if c.get("price_current")]
+                    comp_cats = list({c.get("category", "") for c in comp_skus_list if c.get("category")})
                     comp_seller = Seller(
                         id=str(uuid.uuid4()),
                         seller_id=csid,
                         seller_name=cinfo["name"],
                         marketplace=marketplace,
-                        store_url="",
-                        total_skus=len(cinfo["skus"]),
-                        categories=[],
+                        store_url=f"https://lista.mercadolivre.com.br/loja/{csid}/",
+                        total_skus=len(comp_skus_list),
+                        categories=comp_cats,
                         avg_rating=0.0,
-                        avg_price=0.0,
+                        avg_price=round(sum(comp_prices) / len(comp_prices), 2) if comp_prices else 0.0,
                         is_target=False,
                         created_at=datetime.now(timezone.utc),
                         updated_at=datetime.now(timezone.utc),
                     )
                     db.add(comp_seller)
                     await db.flush()
+                seen_skus: set[str] = set()
                 for cs in cinfo["skus"]:
+                    sid_key = cs.get("sku_id", "")
+                    if sid_key in seen_skus:
+                        continue
+                    seen_skus.add(sid_key)
                     db.add(SKU(
                         id=str(uuid.uuid4()),
-                        sku_id=cs.get("sku_id", ""),
+                        sku_id=sid_key,
                         ean=cs.get("ean"),
                         title=cs.get("title", ""),
                         category=cs.get("category", ""),
