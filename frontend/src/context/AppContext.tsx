@@ -4,6 +4,8 @@ import type { Seller, Theme, Period } from '../types'
 interface AppContextValue {
   selectedSellerId: string | null
   setSelectedSellerId: (id: string | null) => void
+  comparedSellerId: string | null
+  setComparedSellerId: (id: string | null) => void
   sellers: Seller[]
   setSellers: (sellers: Seller[]) => void
   theme: Theme
@@ -18,6 +20,7 @@ const AppContext = createContext<AppContextValue | undefined>(undefined)
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null)
+  const [comparedSellerId, setComparedSellerId] = useState<string | null>(null)
   const [sellers, setSellers] = useState<Seller[]>([])
   const [activePeriod, setActivePeriod] = useState<Period>('30d')
   const [showURLModal, setShowURLModal] = useState(false)
@@ -47,6 +50,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       value={{
         selectedSellerId,
         setSelectedSellerId,
+        comparedSellerId,
+        setComparedSellerId,
         sellers,
         setSellers,
         theme,

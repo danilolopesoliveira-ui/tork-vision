@@ -11,6 +11,7 @@ import PriceVolumeMatrix from './pages/PriceVolumeMatrix'
 import TopProducts from './pages/TopProducts'
 import RevenueEstimator from './pages/RevenueEstimator'
 import MarketTrends from './pages/MarketTrends'
+import StoreComparison from './pages/StoreComparison'
 import { getSellers } from './api/endpoints'
 
 // Error boundary component
@@ -134,6 +135,14 @@ function AppInner() {
               element={
                 <ErrorBoundary>
                   <MarketTrends />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="/compare"
+              element={
+                <ErrorBoundary>
+                  <StoreComparison />
                 </ErrorBoundary>
               }
             />

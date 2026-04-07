@@ -1508,6 +1508,133 @@ async def get_price_heatmap(
 
 
 # ---------------------------------------------------------------------------
+# Routes — Store Comparison
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/compare/{seller_a_id}/{seller_b_id}")
+async def compare_stores(
+    seller_a_id: str,
+    seller_b_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Side-by-side comparison of two sellers: revenue, overlap, categories, top SKUs."""
+
+    async def _resolve(sid: str):
+        res = await db.execute(select(Seller).where(Seller.seller_id == sid))
+        s = res.scalars().first()
+        if not s:
+            raise HTTPException(status_code=404, detail=f"Seller '{sid}' not found")
+        return s
+
+    seller_a, seller_b = await _resolve(seller_a_id), await _resolve(seller_b_id)
+
+    # SKUs
+    async def _skus(internal_id: str):
+        res = await db.execute(select(SKU).where(SKU.seller_id == internal_id))
+        return res.scalars().all()
+
+    skus_a, skus_b = await _skus(seller_a.id), await _skus(seller_b.id)
+
+    # Revenue
+    period_days = 30
+    rev_a = await _revenue_estimator.estimate_seller_revenue(db, seller_a.id, period_days)
+    rev_b = await _revenue_estimator.estimate_seller_revenue(db, seller_b.id, period_days)
+
+    # SKU overlap
+    ids_a = {s.sku_id for s in skus_a}
+    ids_b = {s.sku_id for s in skus_b}
+    shared_ids = ids_a & ids_b
+    overlap_pct_a = round(len(shared_ids) / len(ids_a) * 100, 1) if ids_a else 0.0
+    overlap_pct_b = round(len(shared_ids) / len(ids_b) * 100, 1) if ids_b else 0.0
+
+    # EAN overlap
+    eans_a = {s.ean for s in skus_a if s.ean}
+    eans_b = {s.ean for s in skus_b if s.ean}
+    ean_shared = eans_a & eans_b
+
+    # Category comparison
+    def _cat_summary(skus):
+        cats: dict[str, dict] = {}
+        for s in skus:
+            c = s.category or "Outros"
+            if c not in cats:
+                cats[c] = {"skus": 0, "revenue": 0.0, "avg_price": 0.0, "_prices": []}
+            cats[c]["skus"] += 1
+            sales = s.estimated_monthly_sales or 0
+            cats[c]["revenue"] += sales * s.price_current
+            cats[c]["_prices"].append(s.price_current)
+        for v in cats.values():
+            v["avg_price"] = round(sum(v["_prices"]) / len(v["_prices"]), 2) if v["_prices"] else 0
+            del v["_prices"]
+            v["revenue"] = round(v["revenue"], 2)
+        return cats
+
+    cats_a = _cat_summary(skus_a)
+    cats_b = _cat_summary(skus_b)
+    all_cats = sorted(set(cats_a) | set(cats_b))
+    category_comparison = [
+        {
+            "category": cat,
+            "a_skus": cats_a.get(cat, {}).get("skus", 0),
+            "b_skus": cats_b.get(cat, {}).get("skus", 0),
+            "a_revenue": cats_a.get(cat, {}).get("revenue", 0.0),
+            "b_revenue": cats_b.get(cat, {}).get("revenue", 0.0),
+            "a_avg_price": cats_a.get(cat, {}).get("avg_price", 0.0),
+            "b_avg_price": cats_b.get(cat, {}).get("avg_price", 0.0),
+        }
+        for cat in all_cats
+    ]
+    category_comparison.sort(key=lambda x: x["a_revenue"] + x["b_revenue"], reverse=True)
+
+    # Top 10 SKUs each
+    def _top_skus(skus, limit=10):
+        ranked = sorted(skus, key=lambda s: (s.estimated_monthly_sales or 0) * s.price_current, reverse=True)
+        return [
+            {
+                "sku_id": s.sku_id,
+                "title": s.title[:60],
+                "category": s.category,
+                "price": s.price_current,
+                "estimated_monthly_sales": s.estimated_monthly_sales or 0,
+                "estimated_monthly_revenue": round((s.estimated_monthly_sales or 0) * s.price_current, 2),
+            }
+            for s in ranked[:limit]
+        ]
+
+    return {
+        "seller_a": {
+            "seller_id": seller_a.seller_id,
+            "seller_name": seller_a.seller_name,
+            "total_skus": len(skus_a),
+            "total_estimated_revenue": rev_a["total_estimated_revenue"],
+            "avg_price": seller_a.avg_price,
+            "categories": list(cats_a.keys()),
+            "top_skus": _top_skus(skus_a),
+        },
+        "seller_b": {
+            "seller_id": seller_b.seller_id,
+            "seller_name": seller_b.seller_name,
+            "total_skus": len(skus_b),
+            "total_estimated_revenue": rev_b["total_estimated_revenue"],
+            "avg_price": seller_b.avg_price,
+            "categories": list(cats_b.keys()),
+            "top_skus": _top_skus(skus_b),
+        },
+        "overlap": {
+            "shared_sku_count": len(shared_ids),
+            "shared_ean_count": len(ean_shared),
+            "overlap_pct_a": overlap_pct_a,
+            "overlap_pct_b": overlap_pct_b,
+            "unique_to_a": len(ids_a - ids_b),
+            "unique_to_b": len(ids_b - ids_a),
+            "shared_categories": sorted(set(cats_a) & set(cats_b)),
+        },
+        "category_comparison": category_comparison[:15],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Health check
 # ---------------------------------------------------------------------------
 

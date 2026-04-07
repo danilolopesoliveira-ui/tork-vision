@@ -1,4 +1,5 @@
 import client from './client'
+import type { StoreComparisonResult } from '../types'
 import type {
   Seller,
   SKU,
@@ -135,3 +136,13 @@ export const getPriceVolumeMatrix = (params: MatrixFilters): Promise<MatrixResul
 
 export const getPriceHeatmap = (): Promise<HeatmapResult> =>
   client.get<HeatmapResult>('/matrix/heatmap').then((r) => r.data)
+
+// ============================================================
+// Store Comparison
+// ============================================================
+
+export const getStoreComparison = (
+  sellerAId: string,
+  sellerBId: string
+): Promise<StoreComparisonResult> =>
+  client.get<StoreComparisonResult>(`/compare/${sellerAId}/${sellerBId}`).then((r) => r.data)

@@ -6,6 +6,7 @@ import {
   Star,
   TrendingUp,
   BarChart2,
+  GitCompareArrows,
   Settings,
   Sun,
   Moon,
@@ -23,6 +24,7 @@ const NAV_ITEMS = [
   { to: '/top-products', icon: Star, label: 'Top 20 Produtos' },
   { to: '/revenue', icon: TrendingUp, label: 'Faturamento' },
   { to: '/trends', icon: BarChart2, label: 'Tendências' },
+  { to: '/compare', icon: GitCompareArrows, label: 'Comparar Lojas' },
 ]
 
 export default function Sidebar() {

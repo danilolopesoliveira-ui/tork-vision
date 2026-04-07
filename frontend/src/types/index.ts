@@ -364,6 +364,54 @@ export interface JobResult {
 }
 
 // ============================================================
+// Store Comparison Types
+// ============================================================
+
+export interface ComparisonSellerSummary {
+  seller_id: string
+  seller_name: string
+  total_skus: number
+  total_estimated_revenue: number
+  avg_price: number
+  categories: string[]
+  top_skus: {
+    sku_id: string
+    title: string
+    category: string
+    price: number
+    estimated_monthly_sales: number
+    estimated_monthly_revenue: number
+  }[]
+}
+
+export interface ComparisonOverlap {
+  shared_sku_count: number
+  shared_ean_count: number
+  overlap_pct_a: number
+  overlap_pct_b: number
+  unique_to_a: number
+  unique_to_b: number
+  shared_categories: string[]
+}
+
+export interface ComparisonCategoryRow {
+  category: string
+  a_skus: number
+  b_skus: number
+  a_revenue: number
+  b_revenue: number
+  a_avg_price: number
+  b_avg_price: number
+}
+
+export interface StoreComparisonResult {
+  seller_a: ComparisonSellerSummary
+  seller_b: ComparisonSellerSummary
+  overlap: ComparisonOverlap
+  category_comparison: ComparisonCategoryRow[]
+}
+
+// ============================================================
 // App State Types
 // ============================================================
 
